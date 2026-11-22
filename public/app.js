@@ -31,7 +31,7 @@ const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFin
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
 // 把 AI 搜尋回傳的商品統一成同一種格式
-const normAI = (list) => list.slice(0, 50).map((x, i) => ({
+const normAI = (list, max = 50) => list.slice(0, max).map((x, i) => ({
   rank: parseInt(x?.rank, 10) || i + 1, productName: String(x?.productName ?? '').trim().slice(0, 120), category: String(x?.category ?? '').split('|')[0].trim().slice(0, 40),
   price: numOr(x?.price), discount: numOr(x?.discount), rating: numOr(x?.rating), sales: numOr(x?.monthlySales), rate: numOr(x?.commissionRate),
   trend: ['上升', '持平', '下降'].includes(x?.trend) ? x.trend : '', note: String(x?.reason ?? '').slice(0, 200), url: safeUrl(x?.sourceUrl),
@@ -504,7 +504,7 @@ function renderDisc() {
   }).join('')}</div>
   ${discMeta?.sources?.length ? `<details><summary>搜尋來源（${discMeta.sources.length}）</summary><ul>${discMeta.sources.filter((s) => safeUrl(s.uri)).map((s) => `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></li>`).join('')}</ul></details>` : ''}
   ${discMeta?.meta ? '<div class="checks"><label><input type="checkbox" id="discRank" checked>同時記錄到「商品排行」（追蹤熱度變化）</label></div>' : ''}
-  <div class="btns"><button type="button" class="pri" data-act="discAdd">加入勾選的商品</button><button type="button" data-act="discClear">關閉</button></div>`;
+  <div class="btns"><button type="button" class="pri" data-act="discAdd">加入勾選的商品</button><button type="button" data-act="discAll" data-v="1">全選</button><button type="button" data-act="discAll" data-v="">全不選</button><button type="button" data-act="discClear">關閉</button></div>`;
 }
 
 /* ========== M10 商品排行榜 ========== */
@@ -678,6 +678,7 @@ const ACT = {
     save.i(); disc = []; renderDisc(); renderList(); toast(`已加入 ${pick.length} 件商品，狀態為「觀望中」`);
   },
   discClear() { disc = []; renderDisc(); },
+  discAll(b) { $$('[data-dc]').forEach((x) => { if (!x.disabled) x.checked = !!b.dataset.v; }); },
   copyBm() { copy(bmCode()); },
   fillPlan() { const t = items.filter((i) => ACTIVE.includes(i.status)).sort((a, b) => b.total - a.total).slice(0, 20); $('#fPlan').elements.products.value = t.map((i) => i.name).join('\n'); if (!t.length) toast('清單沒有可用的商品'); },
   async runPortfolio(b) {
@@ -868,7 +869,7 @@ function shopeeGrab(SITE) {
   box.querySelector('[data-x]').onclick = () => { box.style.display = 'none'; };
   box.querySelector('[data-s]').onclick = () => {
     if (!items.size) { alert('還沒擷取到商品：請先往下捲動或換頁再試'); return; }
-    const s = btoa(unescape(encodeURIComponent(JSON.stringify([...items.values()].slice(0, 300)))));
+    const s = btoa(unescape(encodeURIComponent(JSON.stringify([...items.values()].slice(0, 1000)))));
     window.open(SITE + '/#import=' + encodeURIComponent(s), '_blank');
   };
   document.body.appendChild(box);
@@ -881,7 +882,7 @@ function checkImport() {
   history.replaceState(null, '', '#list');
   try {
     const list = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
-    disc = normAI(list.map((x, i) => ({ ...x, rank: i + 1, reason: `蝦皮後台擷取${x.commissionRate ? `｜分潤 ${x.commissionRate}%` : ''}${x.monthlySales ? `｜銷量 ${x.monthlySales}` : ''}` })));
+    disc = normAI(list.map((x, i) => ({ ...x, rank: i + 1, reason: `蝦皮後台擷取${x.commissionRate ? `｜分潤 ${x.commissionRate}%` : ''}${x.monthlySales ? `｜銷量 ${x.monthlySales}` : ''}` })), 1000);
     discPlat = 'reels'; discMeta = { sources: [], meta: null, src: 'shopee' };
     return true;
   } catch { toast('擷取資料格式錯誤，請重新擷取'); return false; }
