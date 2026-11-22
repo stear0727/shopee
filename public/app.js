@@ -22,7 +22,7 @@ const PLATFORMS = { fb: 'Facebook（粉專／社團）', ig: 'Instagram', thread
 const FORMATS = ['圖文貼文', '多圖輪播', '限時動態', '社團分享長文', 'Threads 短文', '清單推薦', '比價懶人包', '開箱心得'];
 const STATUS = { watch: '觀望中', todo: '待發文', copy: '已產文案', done: '已發布', drop: '淘汰' };
 const ACTIVE = ['watch', 'todo', 'copy'];
-const SORTS = { rec: '評分高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
+const SORTS = { rec: '評分高低', comm: '預估分潤高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
 const CATS = ['服飾配件', '美妝保養', '居家生活', '3C 配件', '廚房用品', '母嬰', '寵物', '食品', '運動戶外', '其他'];
 // 關鍵字自動分類（依順序比對，先比對較明確的類別）
 const CAT_RE = [
@@ -46,11 +46,16 @@ const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'disc
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
-// 評分只看銷量與價格（皆由商品資料自動計算）
+// 評分看銷量、預估社群分潤、價格（皆由商品資料自動計算）
 const DIMS = [
-  { k: 'sales', n: '銷量', s: '銷量', w: 60, auto: 1, rule: '≥5 萬→5、≥1 萬→4、≥2,000→3、≥500→2、其他→1' },
-  { k: 'price', n: '價格帶衝動度', s: '價格', w: 40, auto: 1, rule: '≤299→5、≤599→4、≤999→3、≤1,999→2、其他→1' },
+  { k: 'sales', n: '銷量', s: '銷量', w: 40, auto: 1, rule: '≥5 萬→5、≥1 萬→4、≥2,000→3、≥500→2、其他→1' },
+  { k: 'comm', n: '預估社群分潤', s: '分潤', w: 40, auto: 1, rule: '價格 ×（分潤率＋0.5%）：≥150 元→5、≥80→4、≥40→3、≥15→2、其他→1' },
+  { k: 'price', n: '價格帶衝動度', s: '價格', w: 20, auto: 1, rule: '≤299→5、≤599→4、≤999→3、≤1,999→2、其他→1' },
 ];
+// 社群媒體推廣：預估分潤金額 = 商品價格 ×（匯出分潤率 ＋ 0.5%）
+const SOCIAL_BONUS = 0.5;
+const commOf = (p) => num(p.price) * (num(p.base) + num(p.xtra) + SOCIAL_BONUS) / 100;
+const commScore = (v) => (v >= 150 ? 5 : v >= 80 ? 4 : v >= 40 ? 3 : v >= 15 ? 2 : 1);
 const USER_DIMS = DIMS.filter((d) => !d.auto);
 const GRADE_ACT = { S: '主打，本週優先發文', A: '正式發文，穩定推薦', B: '小量測試，用不同開頭 A/B 測試', C: '不建議花時間寫文' };
 
@@ -79,7 +84,7 @@ const festAuto = () => festivals().map((f) => `${f.name}（${f.date}）`).join('
 /* ========== 狀態（localStorage） ========== */
 const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const _s = store.get('settings', {});
-const S = { accessCode: '', ownKey: '', ..._s, weights: _s.weights && 'sales' in _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
+const S = { accessCode: '', ownKey: '', ..._s, weights: _s.weights && 'comm' in _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
 let items = store.get('items', []);
 const save = { s: () => store.set('settings', S), i: () => store.set('items', items) };
@@ -90,7 +95,7 @@ const priceScore = (p) => (p <= 299 ? 5 : p <= 599 ? 4 : p <= 999 ? 3 : p <= 199
 const rateScore = (r) => (r >= 10 ? 5 : r >= 7 ? 4 : r >= 5 ? 3 : r >= 3 ? 2 : 1);
 const gradeOf = (t) => (t >= 80 ? 'S' : t >= 65 ? 'A' : t >= 50 ? 'B' : 'C');
 function scoreOf(p) {
-  const v = { sales: salesScore(num(p.sales)), price: priceScore(num(p.price)) };
+  const v = { sales: salesScore(num(p.sales)), comm: commScore(commOf(p)), price: priceScore(num(p.price)) };
   let sw = 0, t = 0;
   for (const d of DIMS) { const w = Math.max(0, num(S.weights[d.k])); sw += w; t += w * (clamp(num(v[d.k]) || 3, 1, 5) - 1) / 4; }
   const total = sw ? Math.round((t / sw) * 1000) / 10 : 0;
@@ -351,6 +356,7 @@ const SORT_FN = {
   rate: (a, b) => num(b.base) + num(b.xtra) - num(a.base) - num(a.xtra) || b.total - a.total,
   score: (a, b) => b.total - a.total,
   sales: (a, b) => num(b.sales) - num(a.sales) || b.total - a.total,
+  comm: (a, b) => commOf(b) - commOf(a) || b.total - a.total,
   priceAsc: (a, b) => num(a.price) - num(b.price),
   new: (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
 };
@@ -436,6 +442,7 @@ function cardItem(i, idx) {
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : '<span class="muted">價格未知</span>'}${num(i.discount) ? `<span class="disc">-${fmt(num(i.discount))}%</span>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
     ${stars || trend ? `<div class="pc-row"><span>${stars}</span>${trend}</div>` : ''}
     ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
+    <div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${SOCIAL_BONUS}%</span></div>
     <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
     ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觸及／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
@@ -449,7 +456,7 @@ function editItem(id) {
   d.innerHTML = `<form method="dialog" id="fEdit"><h2>${esc(i.name)}</h2>
     <div class="row2">
       <label class="span2">類別<input name="category" maxlength="40" list="cats" value="${esc(i.category)}"></label>
-      ${nf('price', '價格（元）', i.price)}${nf('discount', '折扣 %', i.discount)}
+      ${nf('price', '價格（元）', i.price)}${nf('base', '分潤率 %（匯出值）', i.base)}${nf('discount', '折扣 %', i.discount)}
       ${nf('rating', '評分', i.rating)}${nf('sales', '月銷', i.sales)}
     </div>
     <label>商店名稱<input name="shop" maxlength="80" value="${esc(i.shop)}"></label>
@@ -464,7 +471,7 @@ function editItem(id) {
     if (d.returnValue !== 'ok') return;
     const f = new FormData($('#fEdit'));
     i.note = String(f.get('note')).slice(0, 500); i.category = String(f.get('category')).trim().slice(0, 40); i.url = safeUrl(f.get('url'));
-    i.price = num(f.get('price')); i.shop = String(f.get('shop')).trim().slice(0, 80); i.aff = safeUrl(f.get('aff'));
+    i.price = num(f.get('price')); i.base = num(f.get('base')); i.xtra = 0; i.shop = String(f.get('shop')).trim().slice(0, 80); i.aff = safeUrl(f.get('aff'));
     for (const k of ['discount', 'rating', 'sales']) i[k] = numOr(f.get(k));
     i.actual = Object.fromEntries(['views', 'clicks', 'orders', 'commission'].map((k) => [k, f.get(k)]));
     rescore(i); save.i(); renderList(); toast('已儲存');
@@ -576,9 +583,9 @@ const ACT = {
     const sw = DIMS.reduce((t, d) => t + num(S.weights[d.k]), 0) || 1;
     const d = $('#dlg');
     d.innerHTML = `<div class="dlg-head"><h2>評分說明</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
-      <h3>評分（0–100）</h3><p>只看<b>銷量</b>與<b>價格</b>，兩項都由商品資料自動計算，各換成 1–5 分後依權重加權成 0–100 分（公式：<code>Σ 權重 ×（得分 − 1）÷ 4 ÷ 權重合計</code>）。權重可到「設定」調整；用「編輯」修改銷量或價格，分數會跟著更新。</p>
+      <h3>評分（0–100）</h3><p>看<b>銷量</b>、<b>預估社群分潤</b>與<b>價格</b>，都由商品資料自動計算，各換成 1–5 分後依權重加權成 0–100 分（公式：<code>Σ 權重 ×（得分 − 1）÷ 4 ÷ 權重合計</code>）。權重可到「設定」調整；用「編輯」修改銷量、價格或分潤率，分數會跟著更新。</p>
       <div class="tw"><table><thead><tr><th>項目</th><th>權重</th><th>計分（1–5 分）</th></tr></thead><tbody>${DIMS.map((x) => `<tr><td>${esc(x.n)}</td><td>${fmt(num(S.weights[x.k]) / sw * 100, 0)}%</td><td>${esc(x.rule)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="hint">例：銷量 4 萬（4 分）、價格 299 元（5 分）→ 60%×0.75＋40%×1 = 85 分（S）。</p>
+      <p class="hint">預估社群分潤＝商品價格 ×（匯出分潤率＋${SOCIAL_BONUS}%），社群媒體推廣比匯出的分潤率多 ${SOCIAL_BONUS}%。例：999 元 ×（18.5%＋0.5%）＝ 189.8 元。</p>
       <h3>分級</h3><ul><li><b>S</b>：80 分以上，優先發文</li><li><b>A</b>：65–79 分，穩定推薦</li><li><b>B</b>：50–64 分，小量測試</li><li><b>C</b>：未滿 50 分，不建議</li></ul>
       <h3>分類</h3><p>依商品名稱關鍵字自動判斷（例如「面膜」→美妝保養、「行動電源」→3C 配件），分錯可在卡片按「編輯」修改。</p>`;
     d.showModal();
