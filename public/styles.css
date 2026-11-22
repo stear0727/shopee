@@ -26,7 +26,6 @@ h2{font-size:1.15rem;margin:.2em 0 .6em}h3{font-size:1rem;margin:1em 0 .4em}
 .brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:1.2rem;letter-spacing:.2px;color:var(--fg);text-decoration:none}
 .brand img{width:34px;height:34px;display:block}
 .brand-name .b1{color:var(--brand)}.brand-name .b2{color:var(--brand2)}
-.badge-off{font-size:.75rem;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
 .topnav{margin-left:auto;display:flex;gap:4px}
 .topnav a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:10px;text-decoration:none;color:var(--fg)}
 .side{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
