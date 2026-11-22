@@ -16,7 +16,6 @@ const CS = () => {
   o.perWeek = o.perDay * o.days.length;
   return o;
 };
-const GEN_V = 6;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
 const GR = { S: 0, A: 1, B: 2, C: 3 }, GL = ['S', 'A', 'B', 'C'];
 const PST = { sug: '建議', set: '已排定', done: '已發布' };
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
@@ -185,19 +184,12 @@ function renderCal() {
   calWeek = wkStart(calSel);
   if (calReconcile()) save.i();
   const c = CS(), ws = calWeek, we = addD(ws, 6);
-  // 第一次打開某一週（且雲端同步已完成）時自動產生建議
-  if (calReady && weekSlots(ws, c).length && (S.calGen || {})[ws] !== GEN_V && items.length) {
-    planWeek(ws);
-    setTimeout(() => calAIPlan(ws, null, true), 0);   // 選好商品後交給 AI 排日期與時間
-    const keep = addD(today(), -120);
-    S.calGen = Object.fromEntries(Object.entries({ ...(S.calGen || {}), [ws]: GEN_V }).filter(([k]) => k >= keep));
-    save.s(); save.i();
-  }
   $$('#calTabs [data-t]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.t === calTab)));
   const wk = calTab === 'month' || calTab === 'list';
   $('#calWeekBar').hidden = !wk; $('#calAlerts').hidden = !wk;
   const [y, m] = calMonth.split('-').map(Number);
   $('#calRange').textContent = calTab === 'month' ? `${y} 年 ${m} 月` : `${fmtMD(ws)} – ${fmtMD(we)}`;
+  const fb = $('#calFind'); if (fb && !calAIBusy.has(ws)) { fb.textContent = `🔍 尋找${weekName(ws)}商品`; fb.disabled = false; }
   if (wk) $('#calAlerts').innerHTML = alertsHtml(ws, we, c);
   $('#calBody').innerHTML = calTab === 'month' ? monthHtml() : calTab === 'list' ? listHtml(ws, we) : calTab === 'events' ? eventsHtml() : setHtml(c);
   if (calTab === 'list') updCalBatch();
@@ -223,12 +215,13 @@ function alertsHtml(ws, we, c) {
   const rk = all.filter(({ p, i }) => isOpen(p) && risks(i).length);
   const cnt = wk.length, li = [], wn = weekName(ws);
   const list = (a) => a.slice(0, 6).map(jumpBtn).join('、') + (a.length > 6 ? ` 等 ${a.length} 則` : '');
-  if (calAIBusy.has(ws)) li.push('<li>🤖 AI 正在替這週的建議排定日期與時間…排好後商品才會出現在日曆。</li>');
+  if (calAIBusy.has(ws)) li.push('<li>🤖 已找到商品，AI 正在排定日期與時間…排好後就會出現在日曆。</li>');
   else if (waiting) li.push(`<li class="warn">有 <b>${waiting}</b> 件商品等待 AI 排定日期與時間（AI 暫時無法使用）。<button type="button" data-act="calAITime">AI 重新排程</button></li>`);
   if (od.length) li.push(`<li class="bad">逾期 <b>${od.length}</b> 則（日期已過但還沒標記已發布）：${list(od)}</li>`);
   if (rk.length) li.push(`<li class="warn">風險標記 <b>${rk.length}</b> 則：${list(rk)}</li>`);
   if (!items.length) li.push('<li class="warn">還沒有商品，請先到「商品分析」匯入蝦皮商品檔。</li>');
   else if (!weekSlots(ws, c).length && we >= wkStart(today())) li.push(`<li class="muted">${wn}的發文日都已經過了，請點下週的日期查看建議。</li>`);
+  else if (!wk.length && !waiting && !calAIBusy.has(ws) && weekSlots(ws, c).length) li.push(`<li>${wn}還沒有排程。按上方「🔍 尋找${wn}商品」，系統會從商品分析挑出要推的商品，再由 AI 排好日期與時間放進日曆。</li>`);
   else if (!waiting && !calAIBusy.has(ws) && weekSlots(ws, c).length && cnt < weekTarget(ws, c)) {
     const g = c.fill === 'auto' ? '' : nextFill(ws, we, c);
     li.push(`<li class="warn">${wn}只排入 ${cnt} 則，少於目標 ${weekTarget(ws, c)} 則。原因：${esc(shortWhy(ws, c))}。${g ? `<button type="button" data-act="calFill" data-g="${g}">補入 ${g} 級商品</button>` : ''}</li>`);
@@ -409,13 +402,17 @@ Object.assign(ACT, {
     if (p.st !== 'done') i.calSkip = addD(wkStart(p.d), 6) > (i.calSkip || '') ? addD(wkStart(p.d), 6) : i.calSkip;
     save.i(); renderCal(); toast('已刪除');
   },
-  calRegen() {
+  // 尋找商品：依規則從商品分析挑出這週要推的商品 → AI 排日期與時間 → 進日曆
+  calFind() {
     const c = CS(), wn = weekName(calWeek);
-    if (!weekSlots(calWeek, c).length) { toast(`${wn}的發文日都已經過了，請在月曆點下週的日期再產生`); return; }
-    if (!confirm(`重新產生${wn}的建議？還沒「確定排定」的建議會重新排，已排定與已發布的會保留。`)) return;
-    const r = planWeek(calWeek); S.calGen = { ...(S.calGen || {}), [calWeek]: GEN_V }; save.s(); save.i(); renderCal();
-    toast(`已選出 ${wn}要推的商品，AI 排定日期與時間後會出現在日曆${r.short ? `（還少 ${r.short} 則，原因見上方提醒）` : ''}`);
-    calAIPlan(calWeek, null, true);
+    if (!items.length) { toast('還沒有商品，請先到「商品分析」匯入蝦皮商品檔'); return; }
+    if (!weekSlots(calWeek, c).length) { toast(`${wn}的發文日都已經過了，請在月曆點下週的日期再尋找`); return; }
+    const we = addD(calWeek, 6), old = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= calWeek && p.d <= we && p.d >= today()).length;
+    if (old && !confirm(`${wn}已有 ${old} 則還沒確定的建議，要重新尋找嗎？（已確定排定與已發布的會保留）`)) return;
+    const r = planWeek(calWeek); save.i();
+    if (!allPlans().some(({ p }) => p.pend && p.d >= calWeek && p.d <= we)) { renderCal(); toast(`${wn}沒有找到可推薦的商品（原因見上方提醒）`); return; }
+    toast(`已找到 ${wn}要推的商品，AI 正在排定日期與時間…${r.short ? `（還少 ${r.short} 則）` : ''}`);
+    calAIPlan(calWeek, $('#calFind'), true);
   },
   calFill(b) { const r = genWeek(calWeek, b.dataset.g); save.i(); renderCal(); if (r.added) calAIPlan(calWeek, null, true); else toast(`沒有可補入的 ${b.dataset.g} 級商品`); },
   calSet(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; Object.assign(f0.p, { st: 'set', m: 1 }); save.i(); renderCal(); toast('已確定排定'); },
@@ -441,10 +438,9 @@ Object.assign(ACT, {
     const days = $$('[data-csday]').filter((e) => e.checked).map((e) => Number(e.dataset.csday));
     if (!days.length) { toast('至少選一個發文日'); return; }
     S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(num($('[data-cs="perDay"]').value)) || 3, 1, 10), days };
-    S.calGen = {};   // 設定改了：之後打開各週時重新排（只換掉還沒確定的建議）
-    save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），還沒確定排定的建議會依新設定重新排。`;
+    save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），下次按「尋找商品」時套用。`;
   },
-  calResetSet() { delete S.cal; S.calGen = {}; save.s(); renderCal(); toast('已恢復預設排程設定'); },
+  calResetSet() { delete S.cal; save.s(); renderCal(); toast('已恢復預設排程設定'); },
 });
 const updPerWeek = () => { const el = document.getElementById('perWeekInfo'); if (!el) return; const n = $$('[data-csday]').filter((e) => e.checked).length, pdv = clamp(Math.round(num($('[data-cs="perDay"]').value)) || 0, 0, 10); el.textContent = `每週共 ${n * pdv} 篇（${n} 天 × ${pdv} 篇）`; };
 document.addEventListener('input', (e) => { if (e.target.matches('[data-cs="perDay"]')) updPerWeek(); });
