@@ -916,8 +916,33 @@ function shopeeGrab(SITE) {
       });
   } catch (e) { /* 瀏覽器不支援資源紀錄 */ }
   document.querySelectorAll('script[type="application/json"]').forEach((s) => feed(s.textContent));
+  /* 商品推廣詳情頁：分潤比例只顯示在畫面上的「分潤回饋」表格，直接讀取畫面文字 */
+  const rateOf = (txt, label) => { const m = txt.match(new RegExp(label + '[^%]{0,40}?(\\d+(?:\\.\\d+)?)\\s*%')); return m ? Number(m[1]) : ''; };
+  let lastDetail = '';
+  const scanDetail = () => {
+    const m = location.pathname.match(/product_offer\/(\d+)/);
+    if (!m) return;
+    const txt = document.body.innerText || '';
+    if (!txt.includes('分潤')) return;
+    const social = rateOf(txt, '社群媒體'), video = rateOf(txt, '蝦皮短影音'), live = rateOf(txt, '蝦皮直播');
+    if (social === '' && video === '' && live === '') return;
+    const sig = m[1] + social + video + live;
+    if (sig === lastDetail) return;
+    lastDetail = sig;
+    const line = txt.split('\n').find((l) => l.includes('查看商品詳情'));
+    const name = line ? line.replace('查看商品詳情', '').trim() : '';
+    const pm = txt.match(/\$\s?([\d,]+(?:\.\d+)?)/), sm = txt.match(/已售出\s*([\d.]+\s*[萬kK]?)/);
+    let key = [...items.keys()].find((k) => k.endsWith('_' + m[1]));
+    if (!key) { if (!name) return; key = 'sp_0_' + m[1]; items.set(key, { id: key, productName: name.slice(0, 120), price: pm ? Math.round(toNum(pm[1])) : '', commissionRate: '', monthlySales: sm ? Math.round(toNum(sm[1])) || '' : '', rating: '', discount: '', category: '', sourceUrl: 'https://shopee.tw/product/0/' + m[1] }); }
+    const it = items.get(key);
+    it.commissionRate = social !== '' ? social : Math.max(video || 0, live || 0);
+    it.channelRates = '短影音 ' + (video === '' ? '?' : video) + '%／社群 ' + (social === '' ? '?' : social) + '%／直播 ' + (live === '' ? '?' : live) + '%';
+    box.querySelector('b').textContent = items.size;
+    const n = box.querySelector('i'); if (n) n.textContent = '已讀取分潤：' + (it.productName || '').slice(0, 16) + '… ' + it.commissionRate + '%';
+  };
+  setInterval(scanDetail, 1500);
   box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#fff;color:#1f1a17;border:2px solid #c2410c;border-radius:14px;padding:12px 14px;font:15px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:280px';
-  box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">📥 蝦皮擷取中</div><div>已擷取 <b>0</b> 件商品</div><div style="font-size:13px;color:#625a53;margin:4px 0 8px">請往下捲動、換頁或搜尋，件數會增加。第一頁沒抓到的話，切到第 2 頁再回第 1 頁。</div><button data-s style="background:#c2410c;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">送到選品網站</button> <button data-x style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">隱藏</button>';
+  box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">📥 蝦皮擷取中</div><div>已擷取 <b>0</b> 件商品</div><div style="font-size:13px;color:#625a53;margin:4px 0 8px">請往下捲動、換頁或搜尋，件數會增加。第一頁沒抓到的話，切到第 2 頁再回第 1 頁。<br>分潤比例要點進商品詳情頁才會讀到（在同一個分頁點進去再返回）。</div><i style="display:block;font-size:13px;color:#15803d;margin-bottom:6px"></i><button data-s style="background:#c2410c;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">送到選品網站</button> <button data-x style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">隱藏</button>';
   box.querySelector('[data-x]').onclick = () => { box.style.display = 'none'; };
   box.querySelector('[data-s]').onclick = () => {
     if (!items.size) { alert('還沒擷取到商品：請先往下捲動或換頁再試'); return; }
@@ -934,7 +959,22 @@ function checkImport() {
   history.replaceState(null, '', '#list');
   try {
     const list = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
-    disc = normAI(list.map((x, i) => ({ ...x, rank: i + 1, reason: `蝦皮後台擷取${x.commissionRate ? `｜分潤 ${x.commissionRate}%` : ''}${x.monthlySales ? `｜銷量 ${x.monthlySales}` : ''}` })), 1000);
+    // 已在清單中的商品：補上分潤率等數字後直接更新，不再列入待加入清單
+    const pid = (u) => (String(u || '').match(/(\d+)$/) || [])[1];
+    let upd = 0;
+    const rest = list.filter((x) => {
+      const id = pid(x.sourceUrl);
+      const it = items.find((i) => keyOf(i.name) === keyOf(x.productName) || (id && pid(i.url) === id));
+      if (!it) return true;
+      if (x.commissionRate !== '' && x.commissionRate != null) { it.base = num(x.commissionRate); it.xtra = 0; }
+      if (num(x.price)) it.price = num(x.price);
+      if (num(x.monthlySales)) it.sales = num(x.monthlySales);
+      if (x.channelRates) it.note = it.note && !it.note.startsWith('短影音') ? it.note : x.channelRates;
+      rescore(it); upd++;
+      return false;
+    });
+    if (upd) { save.i(); toast(`已更新清單中 ${upd} 件商品的分潤與數字`); }
+    disc = normAI(rest.map((x, i) => ({ ...x, rank: i + 1, reason: `蝦皮後台擷取${x.channelRates ? `｜${x.channelRates}` : x.commissionRate ? `｜分潤 ${x.commissionRate}%` : ''}${x.monthlySales ? `｜銷量 ${x.monthlySales}` : ''}` })), 1000);
     discPlat = 'reels'; discMeta = { sources: [], meta: null, src: 'shopee' };
     return true;
   } catch { toast('擷取資料格式錯誤，請重新擷取'); return false; }
@@ -959,4 +999,4 @@ bm.addEventListener('click', (e) => { e.preventDefault(); toast('請用滑鼠把
 const imported = checkImport();
 window.addEventListener('hashchange', () => { if (checkImport()) { route(); renderDisc(); } else route(); });
 route();
-if (imported) { renderDisc(); $('#discOut').scrollIntoView({ block: 'start' }); toast(`收到 ${disc.length} 件蝦皮商品，請勾選要加入的`); }
+if (imported && disc.length) { renderDisc(); $('#discOut').scrollIntoView({ block: 'start' }); toast(`收到 ${disc.length} 件新商品，請勾選要加入的`); }
