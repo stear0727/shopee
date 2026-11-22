@@ -1,7 +1,7 @@
 // /api/ai — 唯一的後端端點：任務白名單、伺服器端組裝提示詞、呼叫 Gemini。
 // 金鑰只來自環境變數 GEMINI_API_KEY，或使用者以 x-gemini-key 標頭自備（不記錄、不寫日誌）。
 
-const TASKS = new Set(['analyze', 'plan', 'trend', 'portfolio', 'rank_extract']);
+const TASKS = new Set(['analyze', 'plan', 'trend', 'portfolio', 'rank_extract', 'rank_search']);
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
 const MAX_IMAGE = 2_200_000;            // 壓縮後截圖 base64 上限（約 1.6 MB 原始）
 const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
@@ -69,6 +69,15 @@ ${JSON.stringify(list)}
 1. 組合配置：每項標為「引流款／利潤款／話題款」並說明理由
 2. 本週發片順序表格：順序 | 商品 | 角色 | 理由
 3. 組合風險（題材重複、價格帶集中等）與調整建議` };
+    }
+    case 'rank_search': {
+      const where = PLAT[p.platform] ? PLAT[p.platform] : '社群短影音（Instagram Reels、Facebook Reels、YouTube Shorts、TikTok、Threads）與蝦皮';
+      const topic = s(p.topic, 100);
+      return { search: true, extract: true, low: true, text: `請用 Google 搜尋，找出台灣近 14 天內在 ${where} 上爆紅或熱銷的商品${topic ? `，題材限定「${topic}」` : ''}。今天：${new Date().toISOString().slice(0, 10)}。
+可參考：蝦皮熱銷或熱搜相關報導、TikTok／Reels 熱門帶貨商品、開箱爆紅新聞、團購熱賣文章、比較評測。
+依「被多少來源提到、熱度多高」排序，最多 20 筆。只列搜尋結果中確實出現的具體商品（要有品牌或明確品名），不要編造；price 只有來源明確寫出時才填數字，否則 null。
+只輸出 JSON，不要任何其他文字：
+{"items":[{"rank":1,"productName":"品牌＋品名","price":null,"reason":"為什麼熱門（25 字內）","sourceUrl":"來源網址或 null"}]}` };
     }
     case 'rank_extract':
       return { json: true, low: true, text: `從以下${hasImage ? '截圖' : '文字'}擷取商品排行。榜單來源：${plat(p.source)}。
@@ -146,7 +155,11 @@ export default async (req) => {
       const text = (c?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('').trim();
       if (!text) return json(502, { ok: false, error: `模型未回傳內容（${c?.finishReason || j.promptFeedback?.blockReason || 'unknown'}）` });
       let parsed = null;
-      if (pr.json) { try { parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { /* 前端退回顯示原文 */ } }
+      if (pr.json || pr.extract) {
+        // 搜尋接地時無法強制 JSON 模式，所以從文字中擷取第一個 {...} 區塊
+        const m = text.replace(/```(?:json)?/g, '').match(/\{[\s\S]*\}/);
+        try { parsed = JSON.parse(m ? m[0] : text); } catch { /* 前端退回顯示原文 */ }
+      }
       const seen = new Set();
       const sources = (c.groundingMetadata?.groundingChunks || []).map((g) => g.web)
         .filter((w) => w?.uri && !seen.has(w.uri) && seen.add(w.uri)).map((w) => ({ title: w.title || w.uri, uri: w.uri }));

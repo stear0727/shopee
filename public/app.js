@@ -19,8 +19,9 @@ const stat = (label, val, sub = '', cls = '') => `<div class="stat ${cls}"><span
 
 /* ========== 常數 ========== */
 const PLATFORMS = { reels: 'Instagram Reels', fb: 'Facebook Reels', shorts: 'YouTube Shorts', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮短影音', other: '其他' };
-const SRC_KEYS = Object.keys(PLATFORMS);
-const SRC_SHORT = { reels: 'IG', fb: 'FB', shorts: 'YT', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮', other: '其他' };
+const SOURCES = { ...PLATFORMS, ai_search: 'AI 網路搜尋' };
+const SRC_KEYS = Object.keys(SOURCES);
+const SRC_SHORT = { reels: 'IG', fb: 'FB', shorts: 'YT', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮', other: '其他', ai_search: 'AI 搜尋' };
 const FORMATS = ['開箱', '前後對比', '教學示範', '情境短劇', '清單推薦', '實測評比'];
 const STATUS = { todo: '待拍', done: '已發布', drop: '淘汰' };
 const DIMS = [
@@ -121,10 +122,10 @@ function rankChart(rs) {
     const c = 's' + Math.max(0, SRC_KEYS.indexOf(s));
     const pts = dates.map((d, j) => { const v = rs2.filter((r) => r.date === d && r.source === s).map((r) => num(r.rank)); return v.length ? [X(j), Y(Math.min(...v)), d, Math.min(...v)] : null; }).filter(Boolean);
     if (pts.length > 1) g += `<polyline class="ln ${c}" points="${pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}"/>`;
-    g += pts.map((p) => `<circle class="${c}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4"><title>${esc(PLATFORMS[s] || s)} ${p[2]}：#${p[3]}</title></circle>`).join('');
+    g += pts.map((p) => `<circle class="${c}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4"><title>${esc(SOURCES[s] || s)} ${p[2]}：#${p[3]}</title></circle>`).join('');
   }
-  const legend = srcs.map((s) => `<span class="s${Math.max(0, SRC_KEYS.indexOf(s))}"><i></i>${esc(PLATFORMS[s] || s)}</span>`).join('');
-  const alt = rs2.map((r) => `${r.date} ${PLATFORMS[r.source] || r.source} 第 ${r.rank} 名`).join('；');
+  const legend = srcs.map((s) => `<span class="s${Math.max(0, SRC_KEYS.indexOf(s))}"><i></i>${esc(SOURCES[s] || s)}</span>`).join('');
+  const alt = rs2.map((r) => `${r.date} ${SOURCES[r.source] || r.source} 第 ${r.rank} 名`).join('；');
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="名次走勢（越上方名次越前）：${esc(alt)}">${g}</svg><div class="legend">${legend}</div>`;
 }
 
@@ -457,7 +458,7 @@ function renderRank() {
   if (!rk.date) rk.date = dates.at(-1) || today();
   $('#rkDate').value = rk.date;
   const meta = $('#fRankMeta'); if (!meta.date.value) meta.date.value = today();
-  $('#rkTabs').innerHTML = [['all', '全部'], ...SRC_KEYS.map((k) => [k, PLATFORMS[k]])].map(([k, v]) => `<button type="button" role="tab" data-act="rkTab" data-s="${k}" aria-selected="${rk.src === k}">${esc(v)}</button>`).join('');
+  $('#rkTabs').innerHTML = [['all', '全部'], ...SRC_KEYS.map((k) => [k, SOURCES[k]])].map(([k, v]) => `<button type="button" role="tab" data-act="rkTab" data-s="${k}" aria-selected="${rk.src === k}">${esc(v)}</button>`).join('');
   $('#rkChips').innerHTML = dates.slice(-6).reverse().map((d) => `<button type="button" data-act="rkDay" data-d="${d}"${d === rk.date ? ' class="pri"' : ''}>${d.slice(5)}</button>`).join('');
   const D = rk.date, inSrc = (r) => rk.src === 'all' || r.source === rk.src;
   const day = ranks.filter((r) => r.date === D && inSrc(r));
@@ -503,22 +504,29 @@ function addRank(x, m) {
   return true;
 }
 function renderPreview() {
-  const el = $('#rkPreview');
+  ['#rkPreview', '#rkSearchOut'].forEach((s) => { if (s !== rk.pvEl) $(s).innerHTML = ''; });
+  const el = $(rk.pvEl || '#rkPreview');
   if (!rk.preview.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<h3>AI 解析預覽（確認後才寫入）</h3><div class="tw"><table class="pv"><thead><tr><th>名次</th><th>商品名稱</th><th>價格</th><th></th></tr></thead><tbody>${rk.preview.map((p, i) => `<tr>
+  const m = rk.pvMeta || rankMeta(), auto = !!rk.pvMeta;
+  const src = (rk.pvSources || []).filter((s) => safeUrl(s.uri));
+  el.innerHTML = `<h3>${auto ? 'AI 搜尋結果' : 'AI 解析預覽'}（確認後才寫入，可修改或刪除）</h3><div class="tw"><table class="pv"><thead><tr><th>名次</th><th>商品名稱</th><th>價格</th>${auto ? '<th>熱門理由／來源</th>' : ''}<th></th></tr></thead><tbody>${rk.preview.map((p, i) => `<tr>
     <td><input aria-label="名次" type="number" min="1" inputmode="numeric" data-pv="${i}" data-f="rank" value="${esc(p.rank)}"></td>
     <td><input aria-label="商品名稱" maxlength="120" data-pv="${i}" data-f="productName" value="${esc(p.productName)}"></td>
     <td><input aria-label="價格" type="number" min="0" inputmode="decimal" data-pv="${i}" data-f="price" value="${esc(p.price)}"></td>
+    ${auto ? `<td class="sm">${esc(p.note)}${p.url ? ` <a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</td>` : ''}
     <td><button type="button" class="danger" data-act="pvDel" data-i="${i}" aria-label="刪除此列">✕</button></td></tr>`).join('')}</tbody></table></div>
-  <p class="hint">將寫入：${esc(rankMeta().date)}｜${esc(PLATFORMS[rankMeta().source])}${rankMeta().listName ? '｜' + esc(rankMeta().listName) : ''}（可在上方榜單資訊修改）</p>
-  <div class="btns"><button type="button" class="pri" data-act="pvSave">全部寫入（${rk.preview.length} 筆）</button><button type="button" data-act="pvCancel">取消</button></div>`;
+  ${src.length ? `<details><summary>搜尋來源（${src.length}）</summary><ul>${src.map((s) => `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></li>`).join('')}</ul></details>` : ''}
+  <p class="hint">將寫入：${esc(m.date)}｜${esc(SOURCES[m.source])}${m.listName ? '｜' + esc(m.listName) : ''}${auto ? '' : '（可在上方榜單資訊修改）'}</p>
+  <div class="btns"><button type="button" class="pri" data-act="pvSave">全部寫入排行（${rk.preview.length} 筆）</button><button type="button" data-act="pvCancel">取消</button></div>`;
 }
-function setPreview(j) {
+function setPreview(j, elSel = '#rkPreview', meta = null) {
+  rk.pvEl = elSel; rk.pvMeta = meta; rk.pvSources = j.sources || [];
   const list = Array.isArray(j.json?.items) ? j.json.items : null;
-  if (!list) { $('#rkPreview').innerHTML = `<p class="err">AI 回傳格式無法解析，原文如下：</p><div class="md">${md(j.text)}</div>`; return; }
-  rk.preview = list.slice(0, 50).map((x, i) => ({ rank: parseInt(x?.rank, 10) || i + 1, productName: String(x?.productName ?? '').slice(0, 120), price: Number.isFinite(Number(x?.price)) && x?.price !== null && x?.price !== '' ? Number(x.price) : '' }));
+  if (!list) { rk.preview = []; renderPreview(); $(elSel).innerHTML = `<p class="err">AI 回傳格式無法解析，原文如下：</p><div class="md">${md(j.text)}</div>`; return; }
+  rk.preview = list.slice(0, 50).map((x, i) => ({ rank: parseInt(x?.rank, 10) || i + 1, productName: String(x?.productName ?? '').slice(0, 120), price: Number.isFinite(Number(x?.price)) && x?.price !== null && x?.price !== '' ? Number(x.price) : '', note: String(x?.reason ?? '').slice(0, 200), url: safeUrl(x?.sourceUrl) }))
+    .filter((x) => x.productName.trim());
   renderPreview();
-  if (!rk.preview.length) $('#rkPreview').innerHTML = '<p class="muted">AI 沒有找到排行資料。</p>';
+  if (!rk.preview.length) $(elSel).innerHTML = '<p class="muted">AI 沒有找到符合的熱門商品，換個題材或平台再試一次。</p>';
 }
 async function compress(file) {
   const url = URL.createObjectURL(file);
@@ -545,7 +553,7 @@ function renderSettings() {
   $('#setCode').value = S.accessCode; $('#setKey').value = S.ownKey;
   $('#setWeights').innerHTML = DIMS.map((d) => `<label>${esc(d.n)}${d.auto ? '（自動）' : ''}<input type="number" min="0" max="100" inputmode="numeric" data-sw="${d.k}" value="${esc(S.weights[d.k])}"></label>`).join('');
   $('#setHeat').innerHTML = [['best', '最佳名次分'], ['days', '上榜天數'], ['cover', '跨平台覆蓋']].map(([k, l]) => `<label>${l}<input type="number" min="0" max="1" step="0.05" inputmode="decimal" data-sh="${k}" value="${esc(S.heat[k])}"></label>`).join('');
-  $('#setSrc').innerHTML = SRC_KEYS.map((k) => `<label><input type="checkbox" data-ss="${k}"${S.sources.includes(k) ? ' checked' : ''}>${esc(PLATFORMS[k])}</label>`).join('');
+  $('#setSrc').innerHTML = SRC_KEYS.map((k) => `<label><input type="checkbox" data-ss="${k}"${S.sources.includes(k) ? ' checked' : ''}>${esc(SOURCES[k])}</label>`).join('');
   wSum(); checkConn();
 }
 function wSum() { const t = DIMS.reduce((s, d) => s + num(S.weights[d.k]), 0); $('#wSum').textContent = `權重合計 ${fmt(t)}${t === 100 ? '' : '（不是 100 時會自動按比例換算）'}`; }
@@ -627,9 +635,9 @@ const ACT = {
   pvDel(b) { rk.preview.splice(+b.dataset.i, 1); renderPreview(); },
   pvCancel() { rk.preview = []; renderPreview(); },
   pvSave() {
-    const m = rankMeta(); let n = 0;
+    const m = rk.pvMeta || rankMeta(); let n = 0;
     for (const p of rk.preview) if (addRank(p, m)) n++;
-    save.r(); rk.preview = []; renderPreview(); rk.date = m.date; renderRank(); $('#rkText').value = ''; toast(`已寫入 ${n} 筆`);
+    save.r(); rk.preview = []; rk.pvMeta = null; renderPreview(); rk.date = m.date; rk.src = 'all'; renderRank(); $('#rkText').value = ''; toast(`已寫入 ${n} 筆`);
   },
   // 總覽／設定
   survey(b) { store.set('survey', { a: b.dataset.a, at: Date.now() }); renderHome(); toast('感謝回饋'); },
@@ -683,6 +691,13 @@ document.addEventListener('submit', async (e) => {
     const m = rankMeta(), rank = parseInt(f.rank.value, 10);
     if (!addRank({ rank, productName: f.productName.value, price: f.price.value, url: f.url.value, note: f.note.value }, m)) { toast('請填寫名次與商品名稱'); return; }
     save.r(); rk.date = m.date; f.rank.value = rank + 1; ['productName', 'price', 'url', 'note'].forEach((k) => { f[k].value = ''; }); f.productName.focus(); renderRank(); toast('已新增');
+  } else if (f.id === 'fRkSearch') {
+    const el = $('#rkSearchOut'), platform = f.platform.value, topic = f.topic.value.trim();
+    el.innerHTML = '<div class="loading">AI 正在搜尋網路上的熱門商品，約需 10–25 秒…</div>';
+    try {
+      const j = await ai('rank_search', { platform, topic }, b);
+      setPreview(j, '#rkSearchOut', { date: today(), source: 'ai_search', listName: `AI 搜尋｜${platform === 'all' ? '全部平台' : PLATFORMS[platform]}${topic ? '｜' + topic.slice(0, 30) : ''}`, listSize: 20 });
+    } catch (err) { showErr(el, err); }
   } else if (f.id === 'fPlan') {
     const el = $('#out-plan'); loading(el);
     const products = f.products.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 20);
@@ -698,6 +713,7 @@ document.addEventListener('submit', async (e) => {
 /* ========== 初始化 ========== */
 $$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
 $$('select[data-opt="source"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
+$$('select[data-opt="platformAll"]').forEach((s) => { s.innerHTML = opts({ all: '全部平台', ...PLATFORMS }, 'all'); });
 $$('select[data-opt="format"]').forEach((s) => { s.innerHTML = FORMATS.map((f) => `<option>${esc(f)}</option>`).join(''); });
 $('#sliders').innerHTML = USER_DIMS.map((d) => `<fieldset class="seg"><legend>${esc(d.n)} <span class="w" data-w="${d.k}"></span></legend><p class="hint">${esc(d.q)}</p>
   <div class="segs">${[1, 2, 3, 4, 5].map((i) => `<label><input type="radio" name="s_${d.k}" value="${i}" aria-label="${esc(d.n)} ${i} 分"><span>${i}</span></label>`).join('')}</div>

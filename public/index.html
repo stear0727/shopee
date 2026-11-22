@@ -199,7 +199,16 @@
 <!-- M10 商品排行榜 -->
 <section id="v-rank" class="view" hidden>
   <h1 tabindex="-1">商品排行</h1>
-  <p class="hint">排名一律由你手動記錄，本系統不爬取任何平台。TikTok Creative Center 榜單依據為廣告商品，只當靈感參考。</p>
+  <div class="card">
+    <h2>AI 自動搜尋熱門商品</h2>
+    <p class="hint">AI 會用 Google 搜尋近期的熱銷報導、開箱爆紅新聞與評測，整理出熱門商品排行並附上來源。這不是平台官方的即時榜單，請點來源連結確認。</p>
+    <form id="fRkSearch" class="row2" autocomplete="off">
+      <label>題材（選填）<input name="topic" maxlength="100" placeholder="例：美妝、居家收納；留空代表不限"></label>
+      <label>平台<select name="platform" data-opt="platformAll"></select></label>
+      <div class="btns span2"><button class="pri">AI 搜尋熱門商品</button></div>
+    </form>
+    <div id="rkSearchOut" aria-live="polite"></div>
+  </div>
   <div class="tabs" id="rkTabs" role="tablist"></div>
   <div class="toolbar">
     <label class="inline">日期<input type="date" id="rkDate"></label>
@@ -209,7 +218,8 @@
   <div id="rkDetail"></div>
 
   <div class="card">
-    <h2>新增紀錄</h2>
+    <h2>手動新增紀錄</h2>
+    <p class="hint">自己在平台上看到的排行，也可以手動記錄。TikTok Creative Center 榜單依據為廣告商品，只當靈感參考。</p>
     <form id="fRankMeta" class="row2" autocomplete="off">
       <label>日期<input type="date" name="date"></label>
       <label>榜單來源<select name="source" data-opt="source"></select></label>
