@@ -796,4 +796,6 @@ function setNavMini(on) {
 setNavMini(!!store.get('navMini', false));
 window.addEventListener('hashchange', route);
 route();
+// 打開網站時先自動同步一次，之後改由右上角按鈕手動同步
 idleStatus();
+syncNow();
