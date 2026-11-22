@@ -315,11 +315,7 @@ function eventsHtml() {
     <div class="btns"><button type="button" class="pri" data-act="evEdit">＋ 新增檔期</button></div></div>`;
 }
 function setHtml(c) {
-  return `<div class="card"><h2>發文日與篇數</h2>
-    <fieldset class="days"><legend>要在星期幾發文</legend>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="chk"><input type="checkbox" data-csday="${d}"${c.days.includes(d) ? ' checked' : ''}>週${WD[d]}</label>`).join('')}</fieldset>
-    <div class="row2"><label>每天發幾篇<input type="number" data-cs="perDay" min="1" max="10" step="1" inputmode="numeric" value="${esc(c.perDay)}"><small class="hint">1–10 篇</small></label><p class="hint" id="perWeekInfo">每週共 ${c.perWeek} 篇（${c.days.length} 天 × ${c.perDay} 篇）</p></div>
-    <p class="hint">日曆只會把建議排在你選的日子，每天最多排設定的篇數。</p></div>
-    <div class="card"><h2>排程設定</h2><div class="row2">
+  return `    <div class="card"><h2>排程設定</h2><div class="row2">
     <label>最低入選等級<select data-cs="minG">${['S', 'A', 'B'].map((g) => `<option value="${g}"${c.minG === g ? ' selected' : ''}>${g} 級以上</option>`).join('')}</select></label>
     <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動依序補入下一等級（S→A→B）</option></select></label>
     </div>
@@ -382,10 +378,11 @@ function evEdit(id) {
 }
 function updFindInfo() {
   const f = $('#fFind'); if (!f) return;
-  const c = CS(), from = f.from.value, to = f.to.value, el = $('#findInfo');
+  const days = [...f.querySelectorAll('[name=days]:checked')].map((e) => Number(e.value)), perDay = clamp(Math.round(num(f.perDay.value)) || 0, 0, 10);
+  const c = { ...CS(), days, perDay }, from = f.from.value, to = f.to.value, el = $('#findInfo');
   if (!from || !to || to < from) { el.textContent = '請選擇開始與結束日期'; return; }
   const sl = rangeSlots(from, to, c);
-  el.textContent = sl.length ? `會排在 ${sl.length} 個發文日（${c.days.map((d) => `週${WD[d]}`).join('、')}），每天 ${c.perDay} 篇，最多 ${sl.length * c.perDay} 篇；已有的排程會算進每天的篇數。` : '這段日期沒有你設定的發文日（可到「排程設定」修改）。';
+  el.textContent = !days.length ? '請至少勾選一個發文日。' : sl.length ? `會排在 ${sl.length} 個發文日（${days.map((d) => `週${WD[d]}`).join('、')}），每天 ${perDay} 篇，最多 ${sl.length * perDay} 篇；已有的排程會算進每天的篇數。` : '這段日期沒有勾選的發文日，請換日期或多勾幾天。';
 }
 function calFindDlg() {
   if (!items.length) { toast('還沒有商品，請先到「商品分析」匯入蝦皮商品檔'); return; }
@@ -395,17 +392,22 @@ function calFindDlg() {
     <p class="hint">選擇要排哪幾天的商品。系統會從「商品分析」挑出要推的商品，再由 AI 排好日期與時間放進日曆。</p>
     <div class="btns">${q.map(([l, a, b]) => `<button type="button" class="ghost" data-act="calQ" data-from="${a}" data-to="${b}">${l}</button>`).join('')}</div>
     <div class="row2"><label>開始日期<input name="from" type="date" required min="${td}" value="${from0}"></label><label>結束日期<input name="to" type="date" required min="${td}" value="${addD(from0, 6)}"></label></div>
+    <fieldset class="days"><legend>要在星期幾發文</legend>${[1, 2, 3, 4, 5, 6, 0].map((x) => `<label class="chk"><input type="checkbox" name="days" value="${x}"${CS().days.includes(x) ? ' checked' : ''}>週${WD[x]}</label>`).join('')}</fieldset>
+    <label>每天發幾篇<input name="perDay" type="number" min="1" max="10" step="1" inputmode="numeric" value="${CS().perDay}"></label>
     <p class="hint" id="findInfo"></p>
     <div class="btns"><button value="cancel" formnovalidate class="ghost">取消</button><button value="ok" class="pri">開始尋找</button></div></form>`;
   d.returnValue = '';
   d.onclose = () => {
     d.onclose = null; if (d.returnValue !== 'ok') return;
     const f = new FormData($('#fFind')); let from = String(f.get('from')), to = String(f.get('to'));
+    const days = f.getAll('days').map(Number);
+    if (!days.length) { toast('請至少勾選一個發文日'); calFindDlg(); return; }
+    S.cal = { ...(S.cal || {}), days, perDay: clamp(Math.round(num(f.get('perDay'))) || 3, 1, 10) }; save.s();   // 記住這次的選擇
     if (to < from) [from, to] = [to, from];
     if (from < td) from = td;
     if (diffD(to, from) > 30) { to = addD(from, 30); toast('一次最多 31 天，已調整結束日期'); }
     const c = CS();
-    if (!rangeSlots(from, to, c).length) { toast('這段日期沒有你設定的發文日，請換日期或到「排程設定」修改'); return; }
+    if (!rangeSlots(from, to, c).length) { toast('這段日期沒有勾選的發文日，請換日期或多勾幾天'); return; }
     const old = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= from && p.d <= to).length;
     if (old && !confirm(`這段日期已有 ${old} 則還沒確定的建議，要重新尋找嗎？（已確定排定與已發布的會保留）`)) return;
     let short = 0;
@@ -468,18 +470,16 @@ Object.assign(ACT, {
   evEdit(b) { evEdit(b.dataset.id || ''); },
   evDel(b) { const e = (S.events || []).find((x) => x.id === b.dataset.id); if (e && confirm(`確定刪除檔期「${e.name}」？`)) { S.events = S.events.filter((x) => x.id !== e.id); save.s(); renderCal(); } },
   calSaveSet() {
-    const days = $$('[data-csday]').filter((e) => e.checked).map((e) => Number(e.dataset.csday));
-    if (!days.length) { toast('至少選一個發文日'); return; }
-    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(num($('[data-cs="perDay"]').value)) || 3, 1, 10), days };
+    S.cal = { ...(S.cal || {}), minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value };
     save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），下次按「尋找商品」時套用。`;
   },
-  calResetSet() { delete S.cal; save.s(); renderCal(); toast('已恢復預設排程設定'); },
+  calResetSet() { S.cal = { days: CS().days, perDay: CS().perDay }; save.s(); renderCal(); toast('已恢復預設排程設定'); },
 });
-const updPerWeek = () => { const el = document.getElementById('perWeekInfo'); if (!el) return; const n = $$('[data-csday]').filter((e) => e.checked).length, pdv = clamp(Math.round(num($('[data-cs="perDay"]').value)) || 0, 0, 10); el.textContent = `每週共 ${n * pdv} 篇（${n} 天 × ${pdv} 篇）`; };
-document.addEventListener('input', (e) => { if (e.target.matches('[data-cs="perDay"]')) updPerWeek(); if (e.target.closest('#fFind')) updFindInfo(); });
+
+document.addEventListener('input', (e) => { if (e.target.closest('#fFind')) updFindInfo(); });
 document.addEventListener('change', (e) => {
   const t = e.target;
-  if (t.matches('[data-csday]')) updPerWeek();
+  if (t.closest && t.closest('#fFind')) updFindInfo();
   if (t.matches('[data-cpick]')) { if (t.checked) calPicked.add(t.dataset.cpick); else calPicked.delete(t.dataset.cpick); updCalBatch(); }
 });
 // 拖曳卡片改日期（電腦版）
