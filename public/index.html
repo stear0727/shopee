@@ -55,17 +55,7 @@
 <!-- 發布清單 -->
 <section id="v-pub" class="view" hidden>
   <h1 tabindex="-1">發布清單</h1>
-  <p class="hint">在「商品」頁勾選要發布的商品加入這裡。按「產生文案」會跳出 AI 文案；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
-  <div class="card">
-    <h2>節慶／活動資訊（選填）</h2>
-    <label>提供給 AI 參考的近期節慶或活動<textarea id="festText" rows="2" maxlength="500"></textarea></label>
-    <p class="hint">沒填時會自動帶入未來三週的節慶與電商檔期，可直接修改，例如補上你的優惠內容與時間。AI 只會使用這裡提供的活動細節。</p>
-    <div class="toolbar">
-      <div class="checks"><label><input type="checkbox" id="festOn" checked>產生節慶活動文案</label></div>
-      <span class="grow"></span>
-      <button type="button" data-act="festFill">帶入近期節慶</button>
-    </div>
-  </div>
+  <p class="hint">在「商品」頁勾選要發布的商品加入這裡。按「產生文案」可設定是否加一段節慶活動文案，再由 AI 產生；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
   <h2>待發布 <span class="tag" id="pubQueueN">0</span></h2>
   <div class="toolbar">
     <button type="button" data-act="pubAll">全選</button>

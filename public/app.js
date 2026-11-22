@@ -378,14 +378,13 @@ function setStatus(i, s) {
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
 function updPubBtns() { for (const [id, l] of [['pubDoneBtn', '標記已發布'], ['pubOutBtn', '移出清單']]) { const b = $('#' + id); if (b) { b.textContent = `${l}（${pubPicked.size}）`; b.disabled = !pubPicked.size; } } }
-function renderFest() {
-  const t = $('#festText'), on = $('#festOn'); if (!t) return;
-  if (document.activeElement !== t) t.value = S.festText || festAuto();
-  t.placeholder = festAuto() ? '' : '近三週沒有偵測到節慶，可自行輸入活動資訊（例如：店慶 12/1–12/7 全館 9 折）';
-  on.checked = S.festOn !== false;
-}
+// 產生文案視窗裡的「節慶活動」區塊：預設帶入近三週節慶，可修改或取消
+const festForm = () => `<div class="fest-box">
+  <div class="checks"><label><input type="checkbox" id="festOn"${S.festOn !== false ? ' checked' : ''}>加一段節慶活動文案</label></div>
+  <label>節慶／活動資訊（選填，提供給 AI 參考）<textarea id="festText" rows="2" maxlength="500" placeholder="${festAuto() ? '' : '近三週沒有偵測到節慶，可自行輸入活動資訊（例如：店慶 12/1–12/7 全館 9 折）'}">${esc(S.festText || festAuto())}</textarea></label>
+  <p class="hint">已自動帶入未來三週的節慶與電商檔期，可直接修改（例如補上優惠內容與時間）；AI 只會使用這裡提供的活動細節，商品不適合時不會硬寫。<button type="button" class="link" data-act="festFill">重新帶入近期節慶</button></p>
+</div>`;
 function renderPub() {
-  renderFest();
   for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INQ(i)) pubPicked.delete(id); }
   const q = items.filter(INQ).sort((a, b) => String(a.queuedAt || a.createdAt).localeCompare(String(b.queuedAt || b.createdAt)));
   const d = items.filter((i) => i.status === 'done').sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
@@ -494,14 +493,24 @@ function wSum() { const t = DIMS.reduce((s, d) => s + num(S.weights[d.k]), 0); $
 const go = (h) => { if (location.hash === h) route(); else location.hash = h; };
 const ACT = {
   // 文案：在彈出視窗產生並顯示
-  async itemAI(b) {
+  // 第一步：開啟視窗，先設定節慶活動段落
+  itemAI(b) {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
     const d = $('#dlg');
-    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div><div id="dlgOut"></div>`;
+    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜產生文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+      ${festForm()}
+      <div class="btns"><button type="button" class="pri" data-act="genCopy" data-id="${esc(i.id)}">開始產生文案</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
+      <div id="dlgOut"></div>`;
     d.showModal();
+  },
+  // 第二步：依節慶設定呼叫 AI，結果顯示在同一個視窗
+  async genCopy(b) {
+    const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
+    const d = $('#dlg'), want = $('#festOn').checked, fest = want ? ($('#festText').value.trim() || festAuto()) : '';
     const el = $('#dlgOut'); loading(el);
     try {
-      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: i.scores, total: i.total, grade: i.grade, wantFest: S.festOn !== false, festival: S.festOn !== false ? ($('#festText')?.value.trim() || festAuto()) : '' }, b);
+      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: i.scores, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest }, b);
+      b.textContent = '重新產生';
       if (d.open) el.innerHTML = renderAnalyze(j, i);
       i.aiText = String(outText.analyze || '').slice(0, 8000);
       i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
