@@ -4,7 +4,7 @@
 const TASKS = new Set(['analyze', 'plan', 'trend', 'portfolio', 'rank_extract', 'rank_search']);
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
 const MAX_IMAGE = 2_200_000;            // 壓縮後截圖 base64 上限（約 1.6 MB 原始）
-const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest'];
+const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
 const PLAT = { reels: 'Instagram Reels', fb: 'Facebook Reels', shorts: 'YouTube Shorts', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮短影音', other: '其他' };
 
 const SYS = `你是電商聯盟行銷分析師，專精蝦皮分潤計畫與短影音帶貨（Instagram Reels、Facebook Reels、YouTube Shorts、TikTok、Threads）。
@@ -167,7 +167,14 @@ export default async (req) => {
     }
 
     const msg = j.error?.message || `HTTP ${r.status}`;
-    if (r.status === 429) return json(429, { ok: false, error: 'Gemini 額度或頻率限制，請稍後再試', retryAfter: retrySecs(j) });
+    if (r.status === 429) {
+      // 各模型額度分開計算，先換下一個模型；全部都被限制才回 429
+      const zero = /limit:\s*0\b/.test(msg);
+      last = { status: 429, retry: retrySecs(j), msg: zero
+        ? `模型 ${m} 在你目前的方案下沒有可用額度（limit: 0），可能需要啟用付費方案，或用 GEMINI_MODEL 改用其他模型`
+        : `Gemini 額度或頻率限制（${m}）：${msg.slice(0, 200)}` };
+      continue;
+    }
     if (r.status === 404 || (r.status === 400 && /not found|not supported|unknown model|is not available/i.test(msg))) {
       last = { status: 502, msg: `模型無法使用（已嘗試 ${m}）` };
       continue;
@@ -176,7 +183,7 @@ export default async (req) => {
     if (r.status >= 500) { last = { status: 502, msg: `Gemini 錯誤：${msg}` }; continue; }
     return json(502, { ok: false, error: `Gemini 錯誤：${msg}` });
   }
-  return json(last?.status || 504, { ok: false, error: last?.msg || 'AI 回應逾時，請稍後重試' });
+  return json(last?.status || 504, { ok: false, error: last?.msg || 'AI 回應逾時，請稍後重試', ...(last?.retry ? { retryAfter: last.retry } : {}) });
 };
 
 export const config = { path: '/api/ai' };
