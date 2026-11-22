@@ -4,8 +4,9 @@
  * plan = { id, d: 排定日期, st: sug|set|make|done|perf|skip, p: 排程優先分, g: 入選等級, r: 入選原因, fill: 補位,
  *          m: 手動改過, sk: 略過原因, pf: 平台, at: 發布時間, url: 貼文連結, sub: Sub_id, cv: 文案版本, perf: {views, orders, commission} }
  */
-const CAL_DEF = { minG: 'A', fill: 'remind', perWeek: 10, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
+const CAL_DEF = { minG: 'A', fill: 'auto', perWeek: 10, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
 const CS = () => ({ ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } });
+const GEN_V = 2;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
 const GR = { S: 0, A: 1, B: 2, C: 3 }, GL = ['S', 'A', 'B', 'C'];
 const PST = { sug: '建議', set: '已排定', make: '製作中', done: '已發布', perf: '已回填成效', skip: '略過' };
 const SKIPS = ['缺貨', '不適合', '沒時間', '價格變動', '其他'];
@@ -23,6 +24,7 @@ const allPlans = () => items.flatMap((i) => (Array.isArray(i.plans) ? i.plans.ma
 const findPlan = (pid) => allPlans().find(({ p }) => p.id === pid);
 const dataAge = (i) => { const t = new Date(i.updAt || i.createdAt); return Number.isNaN(+t) ? 999 : Math.floor((Date.now() - t) / 864e5); };
 const risks = (i) => [...(Array.isArray(i.risk) ? i.risk : []), ...(i.oos ? ['缺貨'] : [])];
+const byGrade = (a, b) => (GR[a.p.g] ?? 9) - (GR[b.p.g] ?? 9) || num(b.p.p) - num(a.p.p);   // 卡片依等級（S→A→B）再依優先分排序
 const calSub = (i, p) => { let h = 0; for (const ch of String(i.name || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0; return `${p.pf || i.platform || 'fb'}_${String(p.d).slice(2).replace(/-/g, '')}_${h.toString(36).slice(0, 5)}`; };
 const toLocalDT = (iso) => { const d = iso ? new Date(iso) : new Date(); return Number.isNaN(+d) ? '' : `${ymd(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 
@@ -60,7 +62,7 @@ function scoreCands(ws, slots, grades, c, H, except = new Set()) {
       for (const d of slots) { const e = evOf(i, d, c); if (e) { ev = e; evD = d; break; } }   // 檔期商品排在最早可預熱的發文日
       const P = Math.round(((W.s * num(i.total) + W.h * (H[i.id] ?? 0) + W.c * (ev ? 100 : 0)) / wsum) * 10) / 10;
       return { i, P, ev, evD };
-    }).sort((a, b) => b.P - a.P || num(b.i.total) - num(a.i.total));
+    }).sort((a, b) => GR[a.i.grade] - GR[b.i.grade] || b.P - a.P || num(b.i.total) - num(a.i.total));   // 依等級順序（S→A→B），同等級再比排程優先分
 }
 function reasonOf(s, fill, H) {
   const i = s.i, a = [`總分 ${fmt(num(i.total), 1)}（${i.grade} 級）`];
@@ -129,10 +131,10 @@ function renderCal() {
   if (!calWeek) calWeek = curWeek();
   const c = CS(), ws = calWeek, we = addD(ws, 6);
   // 第一次打開某一週（且雲端同步已完成）時自動產生建議
-  if (calReady && weekSlots(ws, c).length && !(S.calGen || {})[ws] && items.length) {
+  if (calReady && weekSlots(ws, c).length && (S.calGen || {})[ws] !== GEN_V && items.length) {
     planWeek(ws);
     const keep = addD(today(), -120);
-    S.calGen = Object.fromEntries(Object.entries({ ...(S.calGen || {}), [ws]: 1 }).filter(([k]) => k >= keep));
+    S.calGen = Object.fromEntries(Object.entries({ ...(S.calGen || {}), [ws]: GEN_V }).filter(([k]) => k >= keep));
     save.s(); save.i();
   }
   $$('#calTabs [data-t]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.t === calTab)));
@@ -184,7 +186,7 @@ function calCard({ p, i }, pick = false) {
 function weekHtml(ws) {
   const all = allPlans(), td = today(), c = CS();
   return `<p class="hint">電腦版可拖曳卡片到其他日期；手機版請按「管理」改日期。灰底日期不是預設發文日。</p><div class="cal-week">${[...Array(7)].map((_, k) => {
-    const d = addD(ws, k), list = all.filter(({ p }) => p.d === d).sort((a, b) => num(b.p.p) - num(a.p.p));
+    const d = addD(ws, k), list = all.filter(({ p }) => p.d === d).sort(byGrade);
     return `<section class="cal-day${d === td ? ' today' : ''}${c.days.includes(pd(d).getDay()) ? '' : ' off'}${d < td ? ' past' : ''}" data-day="${d}">
       <h3>${esc(fmtMD(d))}${d === td ? ' <span class="tag">今天</span>' : ''}</h3>
       ${list.map((x) => calCard(x)).join('')}
@@ -195,7 +197,7 @@ function listHtml(ws, we) {
   const wk = allPlans().filter(({ p }) => p.d >= ws && p.d <= we);
   const F = { all: ['全部', () => true], sug: ['建議', (p) => p.st === 'sug' && !overdue(p)], set: ['已排定', (p) => p.st === 'set' && !overdue(p)], make: ['製作中', (p) => p.st === 'make' && !overdue(p)], od: ['逾期', overdue], done: ['已發布', (p) => p.st === 'done'], perf: ['已回填成效', (p) => p.st === 'perf'], skip: ['略過', (p) => p.st === 'skip'] };
   if (!F[calFilter]) calFilter = 'all';
-  const arr = wk.filter(({ p }) => F[calFilter][1](p)).sort((a, b) => num(b.p.p) - num(a.p.p));
+  const arr = wk.filter(({ p }) => F[calFilter][1](p)).sort(byGrade);
   for (const id of [...calPicked]) if (!arr.some(({ p }) => p.id === id)) calPicked.delete(id);
   return `<div class="tabs cat-tabs" role="tablist" aria-label="篩選狀態">${Object.entries(F).map(([k, [l, f]]) => `<button type="button" role="tab" data-act="calF" data-f="${k}" aria-selected="${calFilter === k}">${l} <span class="n">${wk.filter(({ p }) => f(p)).length}</span></button>`).join('')}</div>
     <div class="toolbar"><button type="button" data-act="calPickAll">全選</button><button type="button" class="ghost" data-act="calPickNone">取消選取</button>
@@ -218,7 +220,7 @@ function setHtml(c) {
   const n = (k, l, min, max, unit = '') => `<label>${l}<input type="number" data-cs="${k}" min="${min}" max="${max}" step="1" inputmode="numeric" value="${esc(c[k])}">${unit ? `<small class="hint">${min}–${max}${unit}</small>` : ''}</label>`;
   return `<div class="card"><h2>排程設定</h2><div class="row2">
     <label>最低入選等級<select data-cs="minG">${['S', 'A', 'B'].map((g) => `<option value="${g}"${c.minG === g ? ' selected' : ''}>${g} 級以上</option>`).join('')}</select></label>
-    <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動補入下一等級</option></select></label>
+    <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動依序補入下一等級（S→A→B）</option></select></label>
     ${n('perWeek', '每週發文則數', 1, 30, ' 則')}${n('fresh', '商品資料新鮮度上限', 7, 30, ' 天')}
     ${n('cool', '冷卻期', 7, 60, ' 天')}${n('catCap', '同一類別週上限 %', 20, 100, '%')}
     ${n('pre', '檔期提前預熱天數', 3, 14, ' 天')}</div>
@@ -338,7 +340,7 @@ Object.assign(ACT, {
   calToday() { calWeek = curWeek(); renderCal(); },
   calRegen() {
     if (!confirm('重新產生會換掉本週還沒動過的「建議」卡片（已確認、製作中、已發布與你改過的卡片會保留），確定嗎？')) return;
-    const r = planWeek(calWeek); S.calGen = { ...(S.calGen || {}), [calWeek]: 1 }; save.s(); save.i(); renderCal();
+    const r = planWeek(calWeek); S.calGen = { ...(S.calGen || {}), [calWeek]: GEN_V }; save.s(); save.i(); renderCal();
     toast(`已產生 ${r.added} 則建議${r.short ? `，還少 ${r.short} 則` : ''}`);
   },
   calFill(b) { const r = genWeek(calWeek, b.dataset.g); save.i(); renderCal(); toast(r.added ? `已補入 ${r.added} 件 ${b.dataset.g} 級商品` : `沒有可補入的 ${b.dataset.g} 級商品`); },
