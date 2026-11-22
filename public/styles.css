@@ -328,3 +328,4 @@ tr.muted td{color:var(--mut)}
 button.del{color:var(--bad)}
 @media (min-width:900px){.mt{display:flex}.mdots{display:none}.mc{min-height:110px;padding:6px 4px}}
 @media (max-width:760px){.month{padding:6px}.mc{min-height:58px}.ag-t{width:44px;font-size:.9375rem}}
+[hidden]{display:none!important}

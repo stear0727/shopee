@@ -4,9 +4,17 @@
  * 日曆與發布清單分開：發布清單是你手動加入的商品；日曆只放依 AI 推薦日期排出的商品，在日曆上確定排定、產生文案、標記已發布。
  * plan = { id, d: 排定日期, t: 發文時間 HH:MM, tw: 時間來源, st: sug|set|done, p: 排程優先分, g: 入選等級, r: 入選原因, fill: 補位, m: 手動改過, man: 手動新增, at: 發布時間 }
  */
-const CAL_DEF = { minG: 'A', fill: 'auto', perWeek: 10, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
-const CS = () => ({ ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } });
-const GEN_V = 3;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
+const CAL_DEF = { minG: 'A', fill: 'auto', perDay: 3, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
+// 由使用者選發文日與每天篇數；每週則數＝發文日數 × 每天篇數（舊設定的每週則數換算成每天篇數）
+const CS = () => {
+  const o = { ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } };
+  if (!Array.isArray(o.days) || !o.days.length) o.days = CAL_DEF.days;
+  if (!(S.cal && S.cal.perDay) && S.cal && S.cal.perWeek) o.perDay = Math.ceil(S.cal.perWeek / o.days.length);
+  o.perDay = clamp(Math.round(num(o.perDay)) || 3, 1, 10);
+  o.perWeek = o.perDay * o.days.length;
+  return o;
+};
+const GEN_V = 4;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
 const GR = { S: 0, A: 1, B: 2, C: 3 }, GL = ['S', 'A', 'B', 'C'];
 const PST = { sug: '建議', set: '已排定', done: '已發布' };
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
@@ -47,15 +55,14 @@ function weekSlots(ws, c) {
   const all = [...Array(7)].map((_, k) => addD(ws, k));
   let s = all.filter((d) => c.days.includes(pd(d).getDay()));
   if (!s.length) s = all;
-  s = s.filter((d) => d >= today());   // 不排到已經過去的日子
-  return s.length ? s : all.filter((d) => d >= today());   // 本週預設發文日都過了 → 改排本週剩下的日子
+  return s.filter((d) => d >= today());   // 只排你選的發文日，且不排到已經過去的日子
 }
 // 候選商品＋排程優先分 P = (wS×總分 + wH×熱度 + wC×檔期) ÷ 權重合計
 // 冷卻期：近 N 天內排過、發過，或已經排在之後的週
 const isBusy = (i, ws, c) => { const coolFrom = addD(ws, -c.cool); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d > coolFrom) || !!(i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom); };
 const skipped = (i, ws) => !!(i.calSkip && i.calSkip >= ws);   // 在日曆刪除的建議，那一週不再排入
-// 這週的目標則數：每天最多「每週則數 ÷ 發文日數」則，只剩幾天時按比例減少，避免全擠在同一天
-const weekTarget = (ws, c, slots = weekSlots(ws, c)) => { const we = addD(ws, 6), past = allPlans().filter(({ p }) => p.d >= ws && p.d <= we && p.d < today()).length; return Math.min(c.perWeek, past + slots.length * Math.ceil(c.perWeek / c.days.length)); };
+// 這週的目標則數：剩下的發文日 × 每天篇數
+const weekTarget = (ws, c, slots = weekSlots(ws, c)) => { const we = addD(ws, 6), past = allPlans().filter(({ p }) => p.d >= ws && p.d <= we && p.d < today()).length; return Math.min(c.perWeek, past + slots.length * c.perDay); };
 const inWeekOf = (i, ws) => { const we = addD(ws, 6); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d >= ws && p.d <= we); };
 function scoreCands(ws, slots, grades, c, H, except = new Set(), cool = false) {
   const W = c.w, wsum = (W.s + W.h + W.c) || 1;
@@ -97,7 +104,7 @@ function genWeek(ws, fill = '', cool = false) {
   const perDay = Object.fromEntries(slots.map((d) => [d, 0]));
   inWeek.forEach(({ p }) => { if (p.d in perDay) perDay[p.d]++; });
   for (const s of pick) {
-    const d = s.evD || slots.reduce((a, b) => (perDay[b] < perDay[a] ? b : a));
+    const d = s.evD && (perDay[s.evD] || 0) < c.perDay ? s.evD : slots.reduce((a, b) => (perDay[b] < perDay[a] ? b : a));
     perDay[d] = (perDay[d] || 0) + 1;
     plansOf(s.i).push({ id: uid(), d, st: 'sug', p: s.P, g: s.i.grade, r: reasonOf(s, fill, H, cool), fill: !!fill, ...(cool ? { cd: 1 } : {}) });
   }
@@ -289,13 +296,16 @@ function eventsHtml() {
 }
 function setHtml(c) {
   const n = (k, l, min, max, unit = '') => `<label>${l}<input type="number" data-cs="${k}" min="${min}" max="${max}" step="1" inputmode="numeric" value="${esc(c[k])}">${unit ? `<small class="hint">${min}–${max}${unit}</small>` : ''}</label>`;
-  return `<div class="card"><h2>排程設定</h2><div class="row2">
+  return `<div class="card"><h2>發文日與篇數</h2>
+    <fieldset class="days"><legend>要在星期幾發文</legend>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="chk"><input type="checkbox" data-csday="${d}"${c.days.includes(d) ? ' checked' : ''}>週${WD[d]}</label>`).join('')}</fieldset>
+    <div class="row2"><label>每天發幾篇<input type="number" data-cs="perDay" min="1" max="10" step="1" inputmode="numeric" value="${esc(c.perDay)}"><small class="hint">1–10 篇</small></label><p class="hint" id="perWeekInfo">每週共 ${c.perWeek} 篇（${c.days.length} 天 × ${c.perDay} 篇）</p></div>
+    <p class="hint">日曆只會把建議排在你選的日子，每天最多排設定的篇數。</p></div>
+    <div class="card"><h2>排程設定</h2><div class="row2">
     <label>最低入選等級<select data-cs="minG">${['S', 'A', 'B'].map((g) => `<option value="${g}"${c.minG === g ? ' selected' : ''}>${g} 級以上</option>`).join('')}</select></label>
     <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動依序補入下一等級（S→A→B）</option></select></label>
-    ${n('perWeek', '每週發文則數', 1, 30, ' 則')}${n('fresh', '商品資料新鮮度上限', 7, 30, ' 天')}
+    ${n('fresh', '商品資料新鮮度上限', 7, 30, ' 天')}
     ${n('cool', '冷卻期（優先避開近期排過的商品）', 7, 60, ' 天')}${n('catCap', '同一類別週上限 %', 20, 100, '%')}
     ${n('pre', '檔期提前預熱天數', 3, 14, ' 天')}</div>
-    <fieldset class="days"><legend>每週發文日</legend>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="chk"><input type="checkbox" data-csday="${d}"${c.days.includes(d) ? ' checked' : ''}>週${WD[d]}</label>`).join('')}</fieldset>
     <fieldset><legend>排程優先分權重（商品總分／熱度／檔期，會自動換算成合計 1）</legend><div class="row3">
       <label>商品總分<input type="number" data-csw="s" min="0" max="1" step="0.05" value="${esc(c.w.s)}"></label>
       <label>熱度<input type="number" data-csw="h" min="0" max="1" step="0.05" value="${esc(c.w.h)}"></label>
@@ -426,13 +436,17 @@ Object.assign(ACT, {
     const ws = w.s + w.h + w.c; if (!ws) { toast('三項權重不能都是 0'); return; }
     const days = $$('[data-csday]').filter((e) => e.checked).map((e) => Number(e.dataset.csday));
     if (!days.length) { toast('至少選一個發文日'); return; }
-    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perWeek: clamp(Math.round(v('perWeek')), 1, 30), fresh: clamp(Math.round(v('fresh')), 7, 30), cool: clamp(Math.round(v('cool')), 7, 60), catCap: clamp(Math.round(v('catCap')), 20, 100), pre: clamp(Math.round(v('pre')), 3, 14), days, w: { s: Math.round(w.s / ws * 100) / 100, h: Math.round(w.h / ws * 100) / 100, c: Math.round(w.c / ws * 100) / 100 } };
-    save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}）。要套用到本週，請回週視圖按「重新產生建議」。`;
+    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(v('perDay')) || 3, 1, 10), fresh: clamp(Math.round(v('fresh')), 7, 30), cool: clamp(Math.round(v('cool')), 7, 60), catCap: clamp(Math.round(v('catCap')), 20, 100), pre: clamp(Math.round(v('pre')), 3, 14), days, w: { s: Math.round(w.s / ws * 100) / 100, h: Math.round(w.h / ws * 100) / 100, c: Math.round(w.c / ws * 100) / 100 } };
+    S.calGen = {};   // 設定改了：之後打開各週時重新排（只換掉還沒確定的建議）
+    save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），還沒確定排定的建議會依新設定重新排。`;
   },
-  calResetSet() { delete S.cal; save.s(); renderCal(); toast('已恢復預設排程設定'); },
+  calResetSet() { delete S.cal; S.calGen = {}; save.s(); renderCal(); toast('已恢復預設排程設定'); },
 });
+const updPerWeek = () => { const el = document.getElementById('perWeekInfo'); if (!el) return; const n = $$('[data-csday]').filter((e) => e.checked).length, pdv = clamp(Math.round(num($('[data-cs="perDay"]').value)) || 0, 0, 10); el.textContent = `每週共 ${n * pdv} 篇（${n} 天 × ${pdv} 篇）`; };
+document.addEventListener('input', (e) => { if (e.target.matches('[data-cs="perDay"]')) updPerWeek(); });
 document.addEventListener('change', (e) => {
   const t = e.target;
+  if (t.matches('[data-csday]')) updPerWeek();
   if (t.matches('[data-cpick]')) { if (t.checked) calPicked.add(t.dataset.cpick); else calPicked.delete(t.dataset.cpick); updCalBatch(); }
 });
 // 拖曳卡片改日期（電腦版）
