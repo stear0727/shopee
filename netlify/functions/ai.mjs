@@ -28,7 +28,7 @@ const models = () => [...new Set([process.env.GEMINI_MODEL, ...(process.env.GEMI
   .map((m) => (m || '').trim()).filter(Boolean))];
 
 function scores(o) {
-  const names = { pain: '痛點與需求', trust: '信任度', topic: '話題季節性', risk: '低退貨風險', fit: '平台契合', price: '價格衝動度', rate: '佣金吸引力' };
+  const names = { sales: '銷量分', price: '價格衝動度' };
   const out = {};
   for (const [k, label] of Object.entries(names)) if (n(o?.[k]) != null) out[label] = n(o[k]);
   return out;

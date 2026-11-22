@@ -22,7 +22,7 @@ const PLATFORMS = { fb: 'Facebook（粉專／社團）', ig: 'Instagram', thread
 const FORMATS = ['圖文貼文', '多圖輪播', '限時動態', '社團分享長文', 'Threads 短文', '清單推薦', '比價懶人包', '開箱心得'];
 const STATUS = { watch: '觀望中', todo: '待發文', copy: '已產文案', done: '已發布', drop: '淘汰' };
 const ACTIVE = ['watch', 'todo', 'copy'];
-const SORTS = { rec: '綜合推薦', score: '分數高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
+const SORTS = { rec: '評分高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
 const CATS = ['服飾配件', '美妝保養', '居家生活', '3C 配件', '廚房用品', '母嬰', '寵物', '食品', '運動戶外', '其他'];
 // 關鍵字自動分類（依順序比對，先比對較明確的類別）
 const CAT_RE = [
@@ -46,13 +46,10 @@ const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'disc
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
+// 評分只看銷量與價格（皆由商品資料自動計算）
 const DIMS = [
-  { k: 'pain', n: '痛點與需求強度', s: '痛點', w: 14, q: '觀眾是否已經在找解決方法？' },
-  { k: 'trust', n: '銷量與評價信任度', s: '信任', w: 14, q: '評分、評價數、近期銷量是否足以建立信任？' },
-  { k: 'topic', n: '話題性與季節性', s: '話題', w: 10, q: '現在是不是好時機（檔期、天氣、話題）？' },
-  { k: 'risk', n: '退貨與客訴風險', s: '低風險', w: 10, q: '越安全分越高：尺寸、色差、功效爭議是否容易造成退貨？' },
-  { k: 'fit', n: '社群契合度', s: '契合', w: 10, q: '適不適合你的粉絲／社團受眾與選定的貼文形式？' },
-  { k: 'price', n: '價格帶衝動度', s: '價格', w: 12, auto: 1 },
+  { k: 'sales', n: '銷量', s: '銷量', w: 60, auto: 1, rule: '≥5 萬→5、≥1 萬→4、≥2,000→3、≥500→2、其他→1' },
+  { k: 'price', n: '價格帶衝動度', s: '價格', w: 40, auto: 1, rule: '≤299→5、≤599→4、≤999→3、≤1,999→2、其他→1' },
 ];
 const USER_DIMS = DIMS.filter((d) => !d.auto);
 const GRADE_ACT = { S: '主打，本週優先發文', A: '正式發文，穩定推薦', B: '小量測試，用不同開頭 A/B 測試', C: '不建議花時間寫文' };
@@ -82,17 +79,18 @@ const festAuto = () => festivals().map((f) => `${f.name}（${f.date}）`).join('
 /* ========== 狀態（localStorage） ========== */
 const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const _s = store.get('settings', {});
-const S = { accessCode: '', ownKey: '', ..._s, weights: { ...DEF_W, ..._s.weights }, alias: { ..._s.alias } };
+const S = { accessCode: '', ownKey: '', ..._s, weights: _s.weights && 'sales' in _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
 let items = store.get('items', []);
 const save = { s: () => store.set('settings', S), i: () => store.set('items', items) };
 
 /* ========== 確定性公式 ========== */
+const salesScore = (v) => (v >= 50000 ? 5 : v >= 10000 ? 4 : v >= 2000 ? 3 : v >= 500 ? 2 : 1);
 const priceScore = (p) => (p <= 299 ? 5 : p <= 599 ? 4 : p <= 999 ? 3 : p <= 1999 ? 2 : 1);
 const rateScore = (r) => (r >= 10 ? 5 : r >= 7 ? 4 : r >= 5 ? 3 : r >= 3 ? 2 : 1);
 const gradeOf = (t) => (t >= 80 ? 'S' : t >= 65 ? 'A' : t >= 50 ? 'B' : 'C');
 function scoreOf(p) {
-  const v = { ...p.scores, price: priceScore(num(p.price)), rate: rateScore(num(p.base) + num(p.xtra)) };
+  const v = { sales: salesScore(num(p.sales)), price: priceScore(num(p.price)) };
   let sw = 0, t = 0;
   for (const d of DIMS) { const w = Math.max(0, num(S.weights[d.k])); sw += w; t += w * (clamp(num(v[d.k]) || 3, 1, 5) - 1) / 4; }
   const total = sw ? Math.round((t / sw) * 1000) / 10 : 0;
@@ -347,12 +345,7 @@ function renderAnalyze(j, p) {
 }
 /* ========== M7 候選清單 ========== */
 let recMap = {};
-// 綜合推薦指數 0–100：系統分數 50%、單筆期望佣金 30%（相對最高者）、銷量 20%（對數，相對最高者）
-function calcRec() {
-  const act = items.filter((i) => i.status !== 'drop');
-  const maxS = Math.max(1, ...act.map((i) => num(i.sales)));
-  recMap = Object.fromEntries(items.map((i) => [i.id, Math.round(100 * (0.6 * i.total / 100 + 0.4 * (num(i.sales) > 0 ? Math.log10(num(i.sales) + 1) / Math.log10(maxS + 1) : 0)))]));
-}
+function calcRec() { recMap = Object.fromEntries(items.map((i) => [i.id, i.total])); }
 const SORT_FN = {
   rec: (a, b) => (recMap[b.id] || 0) - (recMap[a.id] || 0) || b.total - a.total,
   rate: (a, b) => num(b.base) + num(b.xtra) - num(a.base) - num(a.xtra) || b.total - a.total,
@@ -439,7 +432,7 @@ function cardItem(i, idx) {
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : '<span class="muted">價格未知</span>'}${num(i.discount) ? `<span class="disc">-${fmt(num(i.discount))}%</span>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
     ${stars || trend ? `<div class="pc-row"><span>${stars}</span>${trend}</div>` : ''}
     ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
-    <div class="pc-row sm"><span>推薦指數 <b>${recMap[i.id] ?? '—'}</b>｜<span class="grade g${i.grade}">${i.grade}</span> ${fmt(i.total, 1)} 分</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
+    <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
     ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觸及／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
     <div class="acts"><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
@@ -509,7 +502,7 @@ const ACT = {
     const d = $('#dlg'), want = $('#festOn').checked, fest = want ? ($('#festText').value.trim() || festAuto()) : '';
     const el = $('#dlgOut'); loading(el);
     try {
-      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: i.scores, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest }, b);
+      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest }, b);
       b.textContent = '重新產生';
       if (d.open) el.innerHTML = renderAnalyze(j, i);
       i.aiText = String(outText.analyze || '').slice(0, 8000);
@@ -558,14 +551,12 @@ const ACT = {
   },
   scoreHelp() {
     const sw = DIMS.reduce((t, d) => t + num(S.weights[d.k]), 0) || 1;
-    const src = { price: '自動：價格 ≤299→5、≤599→4、≤999→3、≤1,999→2、其他→1', trust: '自動：匯入時依銷量，≥1 萬→5、≥1,000→4、其他→3' };
     const d = $('#dlg');
     d.innerHTML = `<div class="dlg-head"><h2>評分說明</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
-      <h3>系統分數（0–100）</h3><p>各項目以 1–5 分計，依權重加權換算成 0–100 分：<code>Σ 權重 ×（得分 − 1）÷ 4</code>，再除以權重合計。權重可到「設定」調整。</p>
-      <div class="tw"><table><thead><tr><th>項目</th><th>權重</th><th>來源</th></tr></thead><tbody>${DIMS.map((x) => `<tr><td>${esc(x.n)}</td><td>${fmt(num(S.weights[x.k]) / sw * 100, 0)}%</td><td>${esc(src[x.k] || '預設 3 分（中間值）')}</td></tr>`).join('')}</tbody></table></div>
-      <p class="hint">目前沒有手動評分頁，標示「預設 3 分」的項目對所有商品相同，因此分數高低主要由價格帶與銷量決定。</p>
+      <h3>評分（0–100）</h3><p>只看<b>銷量</b>與<b>價格</b>，兩項都由商品資料自動計算，各換成 1–5 分後依權重加權成 0–100 分（公式：<code>Σ 權重 ×（得分 − 1）÷ 4 ÷ 權重合計</code>）。權重可到「設定」調整；用「編輯」修改銷量或價格，分數會跟著更新。</p>
+      <div class="tw"><table><thead><tr><th>項目</th><th>權重</th><th>計分（1–5 分）</th></tr></thead><tbody>${DIMS.map((x) => `<tr><td>${esc(x.n)}</td><td>${fmt(num(S.weights[x.k]) / sw * 100, 0)}%</td><td>${esc(x.rule)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="hint">例：銷量 4 萬（4 分）、價格 299 元（5 分）→ 60%×0.75＋40%×1 = 85 分（S）。</p>
       <h3>分級</h3><ul><li><b>S</b>：80 分以上，優先發文</li><li><b>A</b>：65–79 分，穩定推薦</li><li><b>B</b>：50–64 分，小量測試</li><li><b>C</b>：未滿 50 分，不建議</li></ul>
-      <h3>推薦指數（0–100，用於排行）</h3><p>系統分數 60%＋銷量 40%。銷量以對數換算，並與目前清單中銷量最高的商品相比，所以匯入新商品後指數會跟著變動。</p>
       <h3>分類</h3><p>依商品名稱關鍵字自動判斷（例如「面膜」→美妝保養、「行動電源」→3C 配件），分錯可在卡片按「編輯」修改。</p>`;
     d.showModal();
   },
