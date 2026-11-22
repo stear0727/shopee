@@ -146,34 +146,49 @@ function calReconcile() {
 // 只排「建議」卡片，且不動你手動改過日期或時間的；AI 無法使用時保留系統排的日期。
 const calAIBusy = new Set();
 const rangeSlots = (from, to, c) => { const out = []; for (let d = from; d <= to; d = addD(d, 1)) if (c.days.includes(pd(d).getDay()) && d >= today()) out.push(d); return out; };
+// 每次送 5 件給 AI（一次送太多會超過伺服器約 10 秒的處理上限）；排好一批就先顯示一批
+const AI_BATCH = 5;
+let calAIErr = '', calAIProg = '';
 async function calAIPlan(from, to, btn = null, auto = false) {
   const key = `${from}~${to}`; if (calAIBusy.has(key)) return;
   const c = CS(), slots = rangeSlots(from, to, c);
   const list = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= from && p.d <= to && p.d >= today() && !p.md && p.tw !== '手動');
   if (!slots.length || !list.length) { if (!auto) toast('這段日期沒有需要 AI 排程的建議（手動改過的會保留）'); return; }
-  const ids = new Set(list.map(({ p }) => p.id)), used = {};
-  allPlans().forEach(({ p }) => { if (p.d >= from && p.d <= to && !ids.has(p.id)) used[p.d] = (used[p.d] || 0) + 1; });
-  calAIBusy.add(key);
-  if (location.hash === '#cal' && !$('#dlg').open) renderCal();   // 顯示「AI 正在排程」
+  const ids = new Set(list.map(({ p }) => p.id)), cnt = {};
+  allPlans().forEach(({ p }) => { if (p.d >= from && p.d <= to && !ids.has(p.id)) cnt[p.d] = (cnt[p.d] || 0) + 1; });
+  calAIBusy.add(key); calAIErr = '';
+  const label = btn ? btn.textContent : '', redraw = () => { if (location.hash === '#cal' && !$('#dlg').open) renderCal(); };
+  if (btn) btn.disabled = true;
+  let n = 0;
   try {
-    const items_ = list.slice(0, 60).map(({ p, i }) => { const e = slots.map((d) => evOf(i, d, c)).find(Boolean); return { id: p.id, name: i.name, category: i.category, price: num(i.price), event: e ? e.name : '', evFrom: e ? addD(e.start, -c.pre) : '' }; });
-    const j = await ai('schedule', { items: items_, perDay: c.perDay, dates: slots.map((d) => ({ date: d, weekday: WD[pd(d).getDay()], used: used[d] || 0 })) }, btn);
-    let n = 0; const cnt = { ...used };
-    for (const r of (j.json && Array.isArray(j.json.plans) ? j.json.plans : [])) {
-      const f0 = list.find(({ p }) => p.id === r.id), m = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
-      if (!f0) continue;
-      // 日期必須是你選的發文日，且那天還沒排滿；不符合就排到最少的那天
-      let d = slots.includes(String(r.date)) && (cnt[r.date] || 0) < c.perDay ? String(r.date) : slots.reduce((a, b) => ((cnt[b] || 0) < (cnt[a] || 0) ? b : a));
-      cnt[d] = (cnt[d] || 0) + 1;
-      Object.assign(f0.p, { d, ai: 1, tw: `AI：${String(r.why || '').slice(0, 30)}` }); delete f0.p.pend;
-      if (m && Number(m[1]) < 24 && Number(m[2]) < 60) f0.p.t = `${pad2(Number(m[1]))}:${m[2]}`;
-      n++;
+    for (let k = 0; k < list.length; k += AI_BATCH) {
+      const part = list.slice(k, k + AI_BATCH);
+      calAIProg = `${Math.min(k + AI_BATCH, list.length)}／${list.length}`; if (btn) btn.textContent = `AI 排程中 ${calAIProg}`;
+      redraw();
+      const items_ = part.map(({ p, i }) => { const e = slots.map((d) => evOf(i, d, c)).find(Boolean); return { id: p.id, name: i.name, category: i.category, price: num(i.price), event: e ? e.name : '', evFrom: e ? addD(e.start, -c.pre) : '' }; });
+      const j = await ai('schedule', { items: items_, perDay: c.perDay, dates: slots.map((d) => ({ date: d, weekday: WD[pd(d).getDay()], used: cnt[d] || 0 })) });
+      for (const r of (j.json && Array.isArray(j.json.plans) ? j.json.plans : [])) {
+        const f0 = part.find(({ p }) => p.id === r.id), m = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
+        if (!f0) continue;
+        // 日期必須在你選的範圍內，且那天還沒排滿；不符合就排到最少的那天
+        const d = slots.includes(String(r.date)) && (cnt[r.date] || 0) < c.perDay ? String(r.date) : slots.reduce((a, b) => ((cnt[b] || 0) < (cnt[a] || 0) ? b : a));
+        cnt[d] = (cnt[d] || 0) + 1;
+        Object.assign(f0.p, { d, ai: 1, tw: `AI：${String(r.why || '').slice(0, 30)}` }); delete f0.p.pend;
+        if (m && Number(m[1]) < 24 && Number(m[2]) < 60) f0.p.t = `${pad2(Number(m[1]))}:${m[2]}`;
+        n++;
+      }
+      save.i();
     }
-    save.i(); if (location.hash === '#cal' && !$('#dlg').open) renderCal();
     toast(n ? `AI 已排好 ${n} 則的日期與時間` : 'AI 沒有回傳可用的排程，請稍後按「AI 重新排程」');
   } catch (e) {
-    toast(`${e.message || 'AI 排程失敗'}；商品會在 AI 排好日期後才出現在日曆，請稍後按「AI 重新排程」`);
-  } finally { calAIBusy.delete(key); if (location.hash === '#cal' && !$('#dlg').open) renderCal(); }
+    calAIErr = e.status === 429 ? 'Gemini 額度用完或請求太頻繁，請稍後再試' : e.status === 502 || e.status === 504 ? 'AI 回應太慢（逾時），請再按一次「AI 重新排程」' : e.message || 'AI 排程失敗';
+    save.i();
+    toast(`${n ? `已排好 ${n} 則；` : ''}其餘失敗：${calAIErr}`);
+  } finally {
+    calAIBusy.delete(key); calAIProg = '';
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+    redraw();
+  }
 }
 
 /* ---------- 畫面 ---------- */
@@ -212,14 +227,14 @@ function shortWhy(ws, c) {
   return t.length ? t.join('、') : '符合條件的商品都已經排進這週了';
 }
 function alertsHtml(ws, we, c) {
-  const waiting = allPlans().filter(({ p }) => p.pend && p.d >= ws && p.d <= we).length;
+  const waiting = allPlans().filter(({ p }) => p.pend && p.d >= today()).length;   // 所有等待 AI 排程的（不限這週）
   const all = shownPlans(), wk = all.filter(({ p }) => p.d >= ws && p.d <= we);
   const pend = wk.filter(({ p }) => p.st === 'set'), sugs = wk.filter(({ p }) => p.st === 'sug' && p.d >= today()), od = all.filter(({ p }) => overdue(p));
   const rk = all.filter(({ p, i }) => isOpen(p) && risks(i).length);
   const cnt = wk.length, li = [], wn = weekName(ws);
   const list = (a) => a.slice(0, 6).map(jumpBtn).join('、') + (a.length > 6 ? ` 等 ${a.length} 則` : '');
-  if (calAIBusy.size) li.push('<li>🤖 已找到商品，AI 正在排定日期與時間…排好後就會出現在日曆。</li>');
-  else if (waiting) li.push(`<li class="warn">有 <b>${waiting}</b> 件商品等待 AI 排定日期與時間（AI 暫時無法使用）。<button type="button" data-act="calAITime">AI 重新排程</button></li>`);
+  if (calAIBusy.size) li.push(`<li>🤖 已找到商品，AI 正在排定日期與時間（${calAIProg}）…排好的會先出現在日曆。</li>`);
+  else if (waiting) li.push(`<li class="warn">有 <b>${waiting}</b> 件商品等待 AI 排定日期與時間${calAIErr ? `（原因：${esc(calAIErr)}）` : ''}。<button type="button" data-act="calAITime">AI 重新排程</button></li>`);
   if (od.length) li.push(`<li class="bad">逾期 <b>${od.length}</b> 則（日期已過但還沒標記已發布）：${list(od)}</li>`);
   if (rk.length) li.push(`<li class="warn">風險標記 <b>${rk.length}</b> 則：${list(rk)}</li>`);
   if (!items.length) li.push('<li class="warn">還沒有商品，請先到「商品分析」匯入蝦皮商品檔。</li>');
