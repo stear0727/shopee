@@ -760,7 +760,13 @@ const ACT = {
       if (batchStop) { stopMsg = '已停止'; break; }
       st[i.id] = '產生中…'; draw();
       try {
-        const j = await ai('analyze', copyReq(i, want, fest));
+        let j;
+        try { j = await ai('analyze', copyReq(i, want, fest)); }
+        catch (e) {   // 逾時或 Gemini 暫時錯誤：自動重試一次
+          if (batchStop || !(e.status === 504 || e.status === 502 || e.name === 'AbortError')) throw e;
+          st[i.id] = '逾時，重試中…'; draw();
+          j = await ai('analyze', copyReq(i, want, fest));
+        }
         applyCopy(i, j, want, fest); save.i(); st[i.id] = '✓ 完成'; ok++;
       } catch (e) {
         st[i.id] = `✕ ${e.message || '失敗'}`; fail++;

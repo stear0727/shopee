@@ -98,9 +98,15 @@ export default async (req) => {
     ...(pr.search ? { tools: [{ google_search: {} }] } : {}),
   };
 
+  // Gemini 3 預設思考程度高、回應慢（長文案常超過 25 秒），改用低思考程度加快速度；模型不支援時自動拿掉再試
+  let thinkOff = false;
+  const bodyFor = (m) => (!thinkOff && /^gemini-3/.test(m)
+    ? { ...reqBody, generationConfig: { ...reqBody.generationConfig, thinkingConfig: { thinkingLevel: 'low' } } } : reqBody);
   const deadline = Date.now() + (Number(process.env.AI_TIMEOUT_MS) || 25000);
   let last = null;
-  for (const m of models()) {
+  const list = models();
+  for (let k = 0; k < list.length; k++) {
+    const m = list[k];
     const left = deadline - Date.now();
     if (left < 1500) break;
     const ctl = new AbortController();
@@ -108,7 +114,7 @@ export default async (req) => {
     let r, j;
     try {
       r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(reqBody), signal: ctl.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(bodyFor(m)), signal: ctl.signal,
       });
       j = await r.json().catch(() => ({}));
     } catch (e) {
@@ -134,6 +140,7 @@ export default async (req) => {
     }
 
     const msg = j.error?.message || `HTTP ${r.status}`;
+    if (r.status === 400 && !thinkOff && /thinking/i.test(msg)) { thinkOff = true; k--; continue; }   // 不支援 thinkingLevel：同一個模型拿掉後重試
     if (r.status === 429) {
       // 各模型額度分開計算，先換下一個模型；全部都被限制才回 429
       const zero = /limit:\s*0\b/.test(msg);
