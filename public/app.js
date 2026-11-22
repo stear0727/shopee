@@ -860,7 +860,7 @@ document.addEventListener('submit', async (e) => {
 
 /* ========== 蝦皮擷取書籤（此函式不在本站執行，而是轉成書籤程式碼在蝦皮頁面執行） ========== */
 function shopeeGrab(SITE) {
-  const VER = '3';
+  const VER = '4';
   if (window.__spg && window.__spg.dataset && window.__spg.dataset.v === VER) { window.__spg.style.display = 'block'; return; }
   if (window.__spg) { /* 頁面上是舊版擷取：先停掉再換新版 */ try { if (window.__spgStop) window.__spgStop(); else window.__spg.remove(); } catch (e) { /* 略過 */ } }
   const NAME = ['name', 'item_name', 'product_name', 'productName', 'itemName', 'title'];
@@ -905,11 +905,13 @@ function shopeeGrab(SITE) {
     if (r) r.textContent = [...items.values()].filter((p) => p.commissionRate !== '' && p.commissionRate != null).length;
     persist();
   };
+  /* 背景暫存蝦皮回傳的商品資料；只有按「擷取這一頁」時，才把出現在目前畫面上的商品正式加入 */
+  const pending = new Map();
+  const merge = (map, p) => { const o = map.get(p.id); if (!o) { map.set(p.id, { ...p }); return true; } for (const k in p) if (p[k] !== '' && p[k] != null && (o[k] === '' || o[k] == null)) o[k] = p[k]; return false; };
   const feed = (t) => {
     try {
       const j = typeof t === 'string' ? JSON.parse(t) : t, out = []; budget = 50000; walk(j, 0, out);
-      for (const p of out) { const o = items.get(p.id); if (!o) items.set(p.id, p); else for (const k in p) if (p[k] !== '' && o[k] === '') o[k] = p[k]; }
-      if (out.length) upd();
+      for (const p of out) merge(pending, p);
     } catch (e) { /* 非 JSON */ }
   };
   const of = window.fetch;
@@ -931,41 +933,61 @@ function shopeeGrab(SITE) {
   document.querySelectorAll('script[type="application/json"]').forEach((s) => feed(s.textContent));
   /* 商品推廣詳情頁：分潤比例只顯示在畫面上的「分潤回饋」表格，直接讀取畫面文字 */
   const rateOf = (txt, label) => { const m = txt.match(new RegExp(label + '[^%]{0,40}?(\\d+(?:\\.\\d+)?)\\s*%')); return m ? Number(m[1]) : ''; };
-  let lastDetail = '';
   const scanDetail = () => {
     const m = location.pathname.match(/product_offer\/(\d+)/);
-    if (!m) return;
+    if (!m) return null;
     const txt = document.body.innerText || '';
-    if (!txt.includes('分潤')) return;
+    if (!txt.includes('分潤')) return null;
     const social = rateOf(txt, '社群媒體'), video = rateOf(txt, '蝦皮短影音'), live = rateOf(txt, '蝦皮直播');
-    if (social === '' && video === '' && live === '') return;
-    const sig = m[1] + social + video + live;
-    if (sig === lastDetail) return;
-    lastDetail = sig;
+    if (social === '' && video === '' && live === '') return null;
     const line = txt.split('\n').find((l) => l.includes('查看商品詳情'));
     const name = line ? line.replace('查看商品詳情', '').trim() : '';
     const pm = txt.match(/\$\s?([\d,]+(?:\.\d+)?)/), sm = txt.match(/已售出\s*([\d.]+\s*[萬kK]?)/);
     let key = [...items.keys()].find((k) => k.endsWith('_' + m[1]));
-    if (!key) { if (!name) return; key = 'sp_0_' + m[1]; items.set(key, { id: key, productName: name.slice(0, 120), price: pm ? Math.round(toNum(pm[1])) : '', commissionRate: '', monthlySales: sm ? Math.round(toNum(sm[1])) || '' : '', rating: '', discount: '', category: '', sourceUrl: 'https://shopee.tw/product/0/' + m[1] }); }
+    if (!key) { const pk = [...pending.keys()].find((k) => k.endsWith('_' + m[1])); if (pk) { items.set(pk, { ...pending.get(pk) }); key = pk; } }
+    if (!key) { if (!name) return null; key = 'sp_0_' + m[1]; items.set(key, { id: key, productName: name.slice(0, 120), price: pm ? Math.round(toNum(pm[1])) : '', commissionRate: '', monthlySales: sm ? Math.round(toNum(sm[1])) || '' : '', rating: '', discount: '', category: '', sourceUrl: 'https://shopee.tw/product/0/' + m[1] }); }
     const it = items.get(key);
     it.commissionRate = social !== '' ? social : Math.max(video || 0, live || 0);
     it.channelRates = '短影音 ' + (video === '' ? '?' : video) + '%／社群 ' + (social === '' ? '?' : social) + '%／直播 ' + (live === '' ? '?' : live) + '%';
-    upd();
-    const n = box.querySelector('i'); if (n) n.textContent = '已讀取分潤：' + (it.productName || '').slice(0, 16) + '… ' + it.commissionRate + '%';
+    return it;
   };
-  const iv = setInterval(scanDetail, 1500);
+  const say = (t) => { const n = box.querySelector('i'); if (n) n.textContent = t; };
+  const squash = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+  const capture = () => {
+    const d = scanDetail();
+    if (d) { upd(); say('已讀取分潤：' + (d.productName || '').slice(0, 16) + '… ' + d.commissionRate + '%'); return; }
+    const txt = squash(document.body.innerText);
+    let found = 0, added = 0;
+    for (const p of pending.values()) {
+      const k = squash(p.productName).slice(0, 14);
+      if (k.length < 4 || !txt.includes(k)) continue;
+      found++; if (merge(items, p)) added++;
+    }
+    upd();
+    say(found ? '本頁找到 ' + found + ' 件，新增 ' + added + ' 件' : '本頁沒有找到商品資料：請等頁面載入完成再按一次；若仍為 0，切到別頁再切回來後再按');
+  };
+  /* 你手動點進商品詳情頁時，自動讀取分潤比例（列表頁仍需手動按「擷取這一頁」） */
+  let lastDetail = '';
+  const autoDetail = () => {
+    const d = scanDetail(); if (!d) return;
+    const sig = d.id + '|' + d.channelRates; if (sig === lastDetail) return;
+    lastDetail = sig; upd(); say('已自動讀取分潤：' + (d.productName || '').slice(0, 16) + '… ' + d.commissionRate + '%');
+  };
+  const iv = setInterval(autoDetail, 1500);
   box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#fff;color:#1f1a17;border:2px solid #c2410c;border-radius:14px;padding:12px 14px;font:15px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:280px';
   const B = 'border-radius:8px;padding:7px 10px;font:inherit;font-size:14px;cursor:pointer;margin:2px;';
-  box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700"><span>📥 擷取中｜<b data-n>0</b> 件（有分潤 <b data-r>0</b>）</span><button data-min title="縮小／展開" style="' + B + 'background:#fff;border:1px solid #ccc;padding:2px 10px">－</button></div>'
-    + '<div data-body><div style="font-size:13px;color:#625a53;margin:6px 0">往下捲動、換頁或搜尋，件數會增加；第一頁沒抓到就切到第 2 頁再回來。<br>分潤比例要點進商品詳情頁才讀得到（可開新分頁，在新分頁再點一次書籤）。<br>資料會自動保存，重新整理後再點書籤即可接續。</div>'
+  box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700"><span>📥 已擷取 <b data-n>0</b> 件（有分潤 <b data-r>0</b>）</span><button data-min title="縮小／展開" style="' + B + 'background:#fff;border:1px solid #ccc;padding:2px 10px">－</button></div>'
+    + '<button data-cap style="' + B + 'display:block;width:100%;margin:8px 0 4px;background:#c2410c;color:#fff;border:0;font-weight:700;font-size:15px;padding:10px">擷取這一頁</button>'
+    + '<div data-body><div style="font-size:13px;color:#625a53;margin:6px 0">列表頁：等商品載入完，按「擷取這一頁」加入畫面上的商品，換頁後再按一次。<br>點進商品詳情頁會自動讀取分潤比例（開新分頁的話，在新分頁再點一次書籤）。<br>已擷取的資料會自動保存，重新整理後再點書籤即可接續。</div>'
     + '<i style="display:block;font-size:13px;color:#15803d;margin-bottom:6px"></i>'
-    + '<button data-s style="' + B + 'background:#c2410c;color:#fff;border:0">送到選品網站</button>'
+    + '<button data-s style="' + B + 'background:#fff;color:#c2410c;border:1px solid #c2410c">送到選品網站</button>'
     + '<button data-clr style="' + B + 'background:#fff;border:1px solid #ccc">清空</button>'
     + '<button data-stop style="' + B + 'background:#fff;color:#b91c1c;border:1px solid #b91c1c">停止擷取</button></div>';
   const body = box.querySelector('[data-body]');
+  box.querySelector('[data-cap]').onclick = capture;
   box.querySelector('[data-min]').onclick = () => { const h = body.style.display === 'none'; body.style.display = h ? 'block' : 'none'; box.querySelector('[data-min]').textContent = h ? '－' : '＋'; };
   box.querySelector('[data-s]').onclick = () => {
-    if (!items.size) { alert('還沒擷取到商品：請先往下捲動或換頁再試'); return; }
+    if (!items.size) { alert('還沒擷取到商品：請先在列表頁按「擷取這一頁」'); return; }
     const s = btoa(unescape(encodeURIComponent(JSON.stringify([...items.values()].slice(0, 1000)))));
     window.open(SITE + '/#import=' + encodeURIComponent(s), '_blank');
   };
