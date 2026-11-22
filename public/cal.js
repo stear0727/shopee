@@ -53,7 +53,7 @@ function weekSlots(ws, c) {
 function scoreCands(ws, slots, grades, c, H, except = new Set()) {
   const coolFrom = addD(ws, -c.cool), W = c.w, wsum = (W.s + W.h + W.c) || 1;
   const busy = (i) => plansOf(i).some((p) => p.st !== 'skip' && p.d > coolFrom) || (i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom);
-  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
+  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && !INQ(i) && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
     .map((i) => {
       let ev = null, evD = '';
       for (const d of slots) { const e = evOf(i, d, c); if (e) { ev = e; evD = d; break; } }   // 檔期商品排在最早可預熱的發文日
@@ -119,15 +119,6 @@ function timeFromBest(txt, d) {
   return h <= 23 && mi <= 59 ? `${pad2(h)}:${pad2(mi)}` : '';
 }
 const prioOf = (i, d, H = heatMap()) => { const c = CS(), ev = evOf(i, d, c), W = c.w, ws = (W.s + W.h + W.c) || 1; return { P: Math.round(((W.s * num(i.total) + W.h * (H[i.id] ?? 0) + W.c * (ev ? 100 : 0)) / ws) * 10) / 10, ev }; };
-// 從發布清單直接加入的商品：排到今天起最近、還沒排滿的發文日（每天上限＝每週則數 ÷ 發文日數）；都滿了就排到最少的那天
-function nextSlot() {
-  const c = CS(), cnt = {};
-  allPlans().forEach(({ p }) => { if (p.st !== 'done') cnt[p.d] = (cnt[p.d] || 0) + 1; });
-  const days = [...Array(14)].map((_, k) => addD(today(), k)).filter((d) => c.days.includes(pd(d).getDay()));
-  if (!days.length) return today();
-  const cap = Math.ceil(c.perWeek / c.days.length);
-  return days.find((d) => (cnt[d] || 0) < cap) || days.reduce((a, b) => ((cnt[b] || 0) < (cnt[a] || 0) ? b : a));
-}
 // 商品目前對應的排程：在發布清單中＝已排定那一則；已發布＝最近一次發布那一則
 function planOf(i) {
   const ps = Array.isArray(i.plans) ? i.plans : [];
@@ -135,27 +126,21 @@ function planOf(i) {
   return INQ(i) ? ps.find((p) => p.st === 'set') || null : null;
 }
 const unsetPlan = (i, p) => { if (p.man) i.plans = plansOf(i).filter((x) => x !== p); else Object.assign(p, { st: 'sug', m: 1 }); };
-// 以商品狀態（發布清單）為準整理排程，回傳是否有變動
+// 以商品狀態（發布清單）為準整理日曆上的排程，回傳是否有變動。
+// 只管從日曆「確定排定」的商品；在商品分析直接加入發布清單的商品屬於純手動發布，不放進日曆。
+const AUTO_R = /^(從發布清單加入|已發布)$/;   // 舊版自動建立、現已不需要的排程
 function calReconcile() {
   let ch = false;
   for (const i of items) {
-    if (!Array.isArray(i.plans)) { if (!INQ(i) && !(i.status === 'done' && i.publishedAt)) continue; i.plans = []; }
+    if (!Array.isArray(i.plans) || !i.plans.length) continue;
     for (const p of i.plans) {                        // 舊版狀態轉換
       if (p.st === 'make') { p.st = 'set'; ch = true; } else if (p.st === 'perf') { p.st = 'done'; ch = true; }
     }
-    const n0 = i.plans.length; i.plans = i.plans.filter((p) => PST[p.st]); if (i.plans.length !== n0) ch = true;
+    const n0 = i.plans.length; i.plans = i.plans.filter((p) => PST[p.st] && !(p.man && AUTO_R.test(p.r || ''))); if (i.plans.length !== n0) ch = true;
     const set = i.plans.filter((p) => p.st === 'set').sort((a, b) => a.d.localeCompare(b.d));
-    if (INQ(i)) {
-      if (!set.length) {                              // 在發布清單但日曆上沒有 → 用建議卡片，或排到最近的發文日
-        const sug = i.plans.filter((p) => p.st === 'sug' && p.d >= today()).sort((a, b) => a.d.localeCompare(b.d))[0];
-        if (sug) Object.assign(sug, { st: 'set', m: 1 });
-        else { const d = nextSlot(), { P } = prioOf(i, d); i.plans.push({ id: uid(), d, st: 'set', p: P, g: i.grade, r: '從發布清單加入', m: 1, man: 1 }); }
-        ch = true;
-      } else if (set.length > 1) { set.slice(1).forEach((p) => unsetPlan(i, p)); ch = true; }
-    } else if (i.status === 'done') {
-      if (set.length) { Object.assign(set[0], { st: 'done', at: i.publishedAt || new Date().toISOString(), m: 1 }); set.slice(1).forEach((p) => unsetPlan(i, p)); ch = true; }
-      if (!i.plans.some((p) => p.st === 'done') && i.publishedAt) { const d = ymd(new Date(i.publishedAt)); i.plans.push({ id: uid(), d, st: 'done', p: prioOf(i, d).P, g: i.grade, r: '已發布', at: i.publishedAt, m: 1, man: 1 }); ch = true; }
-    } else if (set.length) { set.forEach((p) => unsetPlan(i, p)); ch = true; }   // 已移出發布清單 → 取消排定
+    if (INQ(i)) { if (set.length > 1) { set.slice(1).forEach((p) => unsetPlan(i, p)); ch = true; } }
+    else if (i.status === 'done') { if (set.length) { Object.assign(set[0], { st: 'done', at: i.publishedAt || new Date().toISOString(), m: 1 }); set.slice(1).forEach((p) => unsetPlan(i, p)); ch = true; } }
+    else if (set.length) { set.forEach((p) => unsetPlan(i, p)); ch = true; }   // 已移出發布清單 → 取消排定
     // 還沒有時間的排程：依 AI 文案的建議發文時段自動帶入
     const bt = typeof bestTimeOf === 'function' ? bestTimeOf(i) : '';
     if (bt) for (const p of i.plans) if (isOpen(p) && !p.t) { const t = timeFromBest(bt, p.d); if (t) { p.t = t; p.tw = '依 AI 文案建議時段'; ch = true; } }
