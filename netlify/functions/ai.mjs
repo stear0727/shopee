@@ -53,8 +53,8 @@ carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${
     }
     case 'schedule': {
       // 內容日曆：替系統選出的商品，從使用者可發文的日期中挑日期與時間
-      const list = (Array.isArray(p.items) ? p.items : []).slice(0, 40).map((x) => ({ id: s(x.id, 40), 商品: s(x.name, 80), 分類: s(x.category, 40), 價格: n(x.price), 檔期: s(x.event, 40) || undefined, 檔期最早日期: s(x.evFrom, 10) || undefined }));
-      const dates = (Array.isArray(p.dates) ? p.dates : []).slice(0, 14).map((d) => ({ 日期: s(d.date, 10), 星期: s(d.weekday, 2), 已排: n(d.used) || 0 }));
+      const list = (Array.isArray(p.items) ? p.items : []).slice(0, 60).map((x) => ({ id: s(x.id, 40), 商品: s(x.name, 80), 分類: s(x.category, 40), 價格: n(x.price), 檔期: s(x.event, 40) || undefined, 檔期最早日期: s(x.evFrom, 10) || undefined }));
+      const dates = (Array.isArray(p.dates) ? p.dates : []).slice(0, 31).map((d) => ({ 日期: s(d.date, 10), 星期: s(d.weekday, 2), 已排: n(d.used) || 0 }));
       const perDay = Math.min(10, Math.max(1, n(p.perDay) || 3));
       return { json: true, low: true, text: `你是台灣社群媒體（${SOCIAL}）蝦皮分潤貼文的排程助理。請替下列每件商品，從「可發文日期」中挑一天，並挑最適合的發文時間（台灣時間）。
 規則：
