@@ -416,15 +416,11 @@ const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' :
 // 改狀態時一併處理發布時間：改成「已發布」自動記錄現在時間，改離「已發布」則清除
 function setStatus(i, s) {
   if (!STATUS[s]) return;
-  const was = i.status;
   if (s === 'done' && i.status !== 'done') i.publishedAt = new Date().toISOString();
   if (s !== 'done') i.publishedAt = '';
   if ((s === 'todo' || s === 'copy') && !i.queuedAt) i.queuedAt = new Date().toISOString();
   if (s === 'watch' || s === 'drop') i.queuedAt = '';
   i.status = s;
-  // 與內容日曆連動：發布清單標記已發布／取消已發布時，同步更新對應的排程卡片
-  if (s === 'done' && was !== 'done' && typeof calOnPublish === 'function') calOnPublish(i);
-  if ((s === 'todo' || s === 'copy') && was === 'done' && typeof calOnUnpublish === 'function') calOnUnpublish(i);
 }
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
@@ -439,12 +435,9 @@ const festForm = () => `<div class="fest-box">
   <p class="hint">已依現在時間（${fmtDT(new Date().toISOString()).slice(0, 10)}）自動帶入未來三週的節慶與電商檔期，可直接修改（例如補上優惠內容與時間）；AI 只會使用這裡提供的活動細節，商品不適合時不會硬寫。<button type="button" class="link" data-act="festFill">重新帶入近期節慶</button></p>
 </div>`;
 function renderPub() {
-  if (typeof calReconcile === 'function' && calReconcile()) save.i();   // 與內容日曆同步排定日期
   for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INPUB(i)) pubPicked.delete(id); }
   // 待發布與已發布放在同一個清單，標記已發布後留在原位置（依加入時間排序）
-  // 依內容日曆的排定日期與時間排序（已發布留在原位置）
-  const pk = (i) => { const p = typeof planOf === 'function' ? planOf(i) : null; return (p ? `${p.d} ${p.t || '99:99'}` : '9999') + String(i.queuedAt || i.publishedAt || i.createdAt); };
-  const all = items.filter((i) => INQ(i) || i.status === 'done').sort((a, b) => pk(a).localeCompare(pk(b)));
+  const all = items.filter((i) => INQ(i) || i.status === 'done').sort((a, b) => String(a.queuedAt || a.publishedAt || a.createdAt).localeCompare(String(b.queuedAt || b.publishedAt || b.createdAt)));
   $('#pubQueueN').textContent = all.filter(INQ).length; $('#pubDoneN').textContent = all.filter((i) => i.status === 'done').length;
   // 狀態篩選：全部／待發布／已發布
   const nq = all.filter(INQ).length, nd = all.length - nq;
@@ -458,12 +451,6 @@ function renderPub() {
   updPubBtns();
 }
 let pubSel = 'all', pubShown = [];
-// 卡片上的排定發文日期與時間（來自內容日曆），可按「管理時間」修改
-function pubPlan(i, done) {
-  const p = typeof planOf === 'function' ? planOf(i) : null; if (!p) return '';
-  const od = !done && p.d < today();
-  return `<div class="pdate${od ? ' od' : ''}"><span>📅 排定 ${esc(typeof fmtMD === 'function' ? fmtMD(p.d) : p.d)} ${p.t ? `⏰ ${esc(p.t)}` : '<span class="muted">未排時間</span>'}${od ? ' <b>逾期</b>' : ''}</span>${done ? '' : `<button type="button" class="ghost" data-act="calTime" data-pid="${esc(p.id)}">管理時間</button>`}</div>`;
-}
 // AI 文案裡的建議發文時段（舊資料沒有 aiData 時，從文字版「發文時段：」那行取出）
 function bestTimeOf(i) {
   const b = i.aiData && i.aiData.json && i.aiData.json.bestTime;
@@ -480,7 +467,6 @@ function pubRow(i) {
     <div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${bonus()}%</span></div>
     <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${safeUrl(i.url) ? `<a href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</span></div>
     <div class="pc-row"><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
-    ${pubPlan(i, done)}
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
     ${bestTimeOf(i) ? `<div class="besttime"><b>⏰ 建議發文時段</b><span>${esc(bestTimeOf(i))}</span></div>` : ''}
     <div class="acts">
@@ -701,7 +687,7 @@ const ACT = {
       i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
       i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : '';
       if (i.status === 'todo') setStatus(i, 'copy');
-      save.i(); if (location.hash === '#pub') renderPub();
+      save.i(); softRefresh();   // 對話框開著時會等關閉後再重繪目前畫面（發布清單或日曆）
     } catch (e) { showErr(el, e); }
   },
   viewCopy(b) {

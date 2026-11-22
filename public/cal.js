@@ -1,7 +1,7 @@
 /* ========== M11 內容日曆 ==========
  * 只建議、不發布：依商品評分、熱度與檔期排出每週建議發文清單，發布一律由使用者手動完成。
  * 每則排程存在商品的 plans 陣列裡，跟著商品一起雲端同步。
- * 日曆與發布清單結合：確定排定＝加入發布清單、取消排定＝移出發布清單，已發布一律在發布清單標記。
+ * 日曆與發布清單分開：發布清單是你手動加入的商品；日曆只放依 AI 推薦日期排出的商品，在日曆上確定排定、產生文案、標記已發布。
  * plan = { id, d: 排定日期, t: 發文時間 HH:MM, tw: 時間來源, st: sug|set|done, p: 排程優先分, g: 入選等級, r: 入選原因, fill: 補位, m: 手動改過, man: 手動新增, at: 發布時間 }
  */
 const CAL_DEF = { minG: 'A', fill: 'auto', perWeek: 10, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
@@ -25,7 +25,7 @@ const dataAge = (i) => { const t = new Date(i.updAt || i.createdAt); return Numb
 const risks = (i) => [...(Array.isArray(i.risk) ? i.risk : []), ...(i.oos ? ['缺貨'] : [])];
 const byGrade = (a, b) => (GR[a.p.g] ?? 9) - (GR[b.p.g] ?? 9) || num(b.p.p) - num(a.p.p);   // 卡片依等級（S→A→B）再依優先分排序
 
-let calWeek = '', calTab = 'week', calFilter = 'all', calReady = false;
+let calWeek = '', calTab = 'month', calFilter = 'all', calReady = false, calSel = '', calMonth = '';
 const calPicked = new Set();
 // 預設顯示本週；本週的發文日都已過去時（例如週日），改顯示下週
 const curWeek = () => { const w = wkStart(today()); return weekSlots(w, CS()).length ? w : addD(w, 7); };
@@ -50,9 +50,12 @@ function weekSlots(ws, c) {
   return s.filter((d) => d >= today());   // 不排到已經過去的日子
 }
 // 候選商品＋排程優先分 P = (wS×總分 + wH×熱度 + wC×檔期) ÷ 權重合計
+// 冷卻期：近 N 天內排過、發過，或已經排在之後的週
+const isBusy = (i, ws, c) => { const coolFrom = addD(ws, -c.cool); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d > coolFrom) || !!(i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom); };
+const skipped = (i, ws) => !!(i.calSkip && i.calSkip >= ws);   // 在日曆刪除的建議，那一週不再排入
 function scoreCands(ws, slots, grades, c, H, except = new Set()) {
-  const coolFrom = addD(ws, -c.cool), W = c.w, wsum = (W.s + W.h + W.c) || 1;
-  const busy = (i) => plansOf(i).some((p) => p.st !== 'skip' && p.d > coolFrom) || (i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom);
+  const W = c.w, wsum = (W.s + W.h + W.c) || 1;
+  const busy = (i) => isBusy(i, ws, c) || skipped(i, ws);
   return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && !INQ(i) && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
     .map((i) => {
       let ev = null, evD = '';
@@ -74,7 +77,7 @@ function reasonOf(s, fill, H) {
 function genWeek(ws, fill = '') {
   const c = CS(), we = addD(ws, 6), slots = weekSlots(ws, c);
   if (!slots.length) return { added: 0, short: 0 };
-  if (!fill) for (const i of items) if (Array.isArray(i.plans)) i.plans = i.plans.filter((p) => !(p.st === 'sug' && !p.m && p.d >= ws && p.d <= we && p.d >= today()));
+  if (!fill) for (const i of items) if (Array.isArray(i.plans)) i.plans = i.plans.filter((p) => !(p.st === 'sug' && p.d >= ws && p.d <= we && p.d >= today()));
   const inWeek = allPlans().filter(({ p }) => p.d >= ws && p.d <= we && p.st !== 'skip');
   const need = c.perWeek - inWeek.length;
   if (need <= 0) return { added: 0, short: 0 };
@@ -119,16 +122,8 @@ function timeFromBest(txt, d) {
   return h <= 23 && mi <= 59 ? `${pad2(h)}:${pad2(mi)}` : '';
 }
 const prioOf = (i, d, H = heatMap()) => { const c = CS(), ev = evOf(i, d, c), W = c.w, ws = (W.s + W.h + W.c) || 1; return { P: Math.round(((W.s * num(i.total) + W.h * (H[i.id] ?? 0) + W.c * (ev ? 100 : 0)) / ws) * 10) / 10, ev }; };
-// 商品目前對應的排程：在發布清單中＝已排定那一則；已發布＝最近一次發布那一則
-function planOf(i) {
-  const ps = Array.isArray(i.plans) ? i.plans : [];
-  if (i.status === 'done') return ps.filter((p) => p.st === 'done').sort((a, b) => String(b.at).localeCompare(String(a.at)))[0] || null;
-  return INQ(i) ? ps.find((p) => p.st === 'set') || null : null;
-}
-const unsetPlan = (i, p) => { if (p.man) i.plans = plansOf(i).filter((x) => x !== p); else Object.assign(p, { st: 'sug', m: 1 }); };
-// 以商品狀態（發布清單）為準整理日曆上的排程，回傳是否有變動。
-// 只管從日曆「確定排定」的商品；在商品分析直接加入發布清單的商品屬於純手動發布，不放進日曆。
-const AUTO_R = /^(從發布清單加入|已發布)$/;   // 舊版自動建立、現已不需要的排程
+// 整理日曆上的排程（舊資料轉換＋自動帶入時間），回傳是否有變動
+const AUTO_R = /^(從發布清單加入|已發布)$/;   // 舊版跟發布清單連動時自動建立、現已不需要的排程
 function calReconcile() {
   let ch = false;
   for (const i of items) {
@@ -137,28 +132,22 @@ function calReconcile() {
       if (p.st === 'make') { p.st = 'set'; ch = true; } else if (p.st === 'perf') { p.st = 'done'; ch = true; }
     }
     const n0 = i.plans.length; i.plans = i.plans.filter((p) => PST[p.st] && !(p.man && AUTO_R.test(p.r || ''))); if (i.plans.length !== n0) ch = true;
-    const set = i.plans.filter((p) => p.st === 'set').sort((a, b) => a.d.localeCompare(b.d));
-    if (INQ(i)) { if (set.length > 1) { set.slice(1).forEach((p) => unsetPlan(i, p)); ch = true; } }
-    else if (i.status === 'done') { if (set.length) { Object.assign(set[0], { st: 'done', at: i.publishedAt || new Date().toISOString(), m: 1 }); set.slice(1).forEach((p) => unsetPlan(i, p)); ch = true; } }
-    else if (set.length) { set.forEach((p) => unsetPlan(i, p)); ch = true; }   // 已移出發布清單 → 取消排定
     // 還沒有時間的排程：依 AI 文案的建議發文時段自動帶入
     const bt = typeof bestTimeOf === 'function' ? bestTimeOf(i) : '';
     if (bt) for (const p of i.plans) if (isOpen(p) && !p.t) { const t = timeFromBest(bt, p.d); if (t) { p.t = t; p.tw = '依 AI 文案建議時段'; ch = true; } }
   }
   return ch;
 }
-function calOnPublish(i) {
-  const p = plansOf(i).filter((x) => x.st === 'set')[0];
-  if (p) Object.assign(p, { st: 'done', at: i.publishedAt || new Date().toISOString(), m: 1 });
-}
-function calOnUnpublish(i) {
-  const p = plansOf(i).filter((x) => x.st === 'done').sort((a, b) => String(b.at).localeCompare(String(a.at)))[0];
-  if (p) Object.assign(p, { st: 'set', at: '', m: 1 });
-}
-
 /* ---------- 畫面 ---------- */
+function initSel() {
+  calWeek = curWeek();
+  const ws = weekSlots(calWeek, CS());
+  calSel = calWeek === wkStart(today()) ? today() : ws[0] || calWeek;
+  calMonth = calSel.slice(0, 7);
+}
 function renderCal() {
-  if (!calWeek) calWeek = curWeek();
+  if (!calSel) initSel();
+  calWeek = wkStart(calSel);
   if (calReconcile()) save.i();
   const c = CS(), ws = calWeek, we = addD(ws, 6);
   // 第一次打開某一週（且雲端同步已完成）時自動產生建議
@@ -169,32 +158,52 @@ function renderCal() {
     save.s(); save.i();
   }
   $$('#calTabs [data-t]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.t === calTab)));
-  const wk = calTab === 'week' || calTab === 'list';
+  const wk = calTab === 'month' || calTab === 'list';
   $('#calWeekBar').hidden = !wk; $('#calAlerts').hidden = !wk;
-  $('#calRange').textContent = `${fmtMD(ws)} – ${fmtMD(we)}${ws === wkStart(today()) ? '｜本週' : ws === addD(wkStart(today()), 7) ? '｜下週' : ''}`;
+  const [y, m] = calMonth.split('-').map(Number);
+  $('#calRange').textContent = calTab === 'month' ? `${y} 年 ${m} 月` : `${fmtMD(ws)} – ${fmtMD(we)}`;
   if (wk) $('#calAlerts').innerHTML = alertsHtml(ws, we, c);
-  $('#calBody').innerHTML = calTab === 'week' ? weekHtml(ws) : calTab === 'list' ? listHtml(ws, we) : calTab === 'events' ? eventsHtml() : setHtml(c);
+  $('#calBody').innerHTML = calTab === 'month' ? monthHtml() : calTab === 'list' ? listHtml(ws, we) : calTab === 'events' ? eventsHtml() : setHtml(c);
   if (calTab === 'list') updCalBatch();
 }
+const weekName = (ws) => (ws === wkStart(today()) ? '本週' : ws === addD(wkStart(today()), 7) ? '下週' : `${fmtMD(ws)} 那週`);
 const jumpBtn = ({ p, i }) => `<button type="button" class="link" data-act="calJump" data-pid="${esc(p.id)}">${esc(fmtMD(p.d))} ${esc(i.name.slice(0, 18))}</button>`;
+// 為什麼建議不夠：逐件說明被排除的原因
+function shortWhy(ws, c) {
+  const we = addD(ws, 6), gs = GL.slice(0, (c.fill === 'auto' ? GR.B : GR[c.minG]) + 1);
+  const inWeek = new Set(allPlans().filter(({ p }) => p.d >= ws && p.d <= we).map(({ i }) => i.id));
+  const n = { low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
+  for (const i of items) {
+    if (i.status === 'drop' || inWeek.has(i.id)) continue;
+    if (INQ(i)) n.list++; else if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; else if (isBusy(i, ws, c)) n.cool++;
+  }
+  const t = [[n.cool, `冷卻期內或已排在其他週 ${n.cool} 件（${c.cool} 天內不重複排同一件）`], [n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`], [n.list, `已在發布清單（手動）${n.list} 件`]].filter(([k]) => k).map(([, v]) => v);
+  return t.length ? t.join('、') : '沒有其他商品可排';
+}
 function alertsHtml(ws, we, c) {
   const all = allPlans(), wk = all.filter(({ p }) => p.d >= ws && p.d <= we);
   const pend = wk.filter(({ p }) => p.st === 'set'), sugs = wk.filter(({ p }) => p.st === 'sug' && p.d >= today()), od = all.filter(({ p }) => overdue(p));
   const stale = all.filter(({ p, i }) => isOpen(p) && dataAge(i) > c.fresh), rk = all.filter(({ p, i }) => isOpen(p) && risks(i).length);
-  const cnt = wk.filter(({ p }) => p.st !== 'skip').length, li = [];
+  const cnt = wk.length, li = [], wn = weekName(ws);
   const list = (a) => a.slice(0, 6).map(jumpBtn).join('、') + (a.length > 6 ? ` 等 ${a.length} 則` : '');
-  li.push(`<li>本週已排定（在發布清單）<b>${pend.length}</b> 則${pend.length ? `：${list(pend)}` : ''}</li>`);
-  if (sugs.length) li.push(`<li>建議待確認 <b>${sugs.length}</b> 則，按「確定排定」加入發布清單</li>`);
-  if (od.length) li.push(`<li class="bad">逾期 <b>${od.length}</b> 則（日期已過但未標記已發布）：${list(od)}</li>`);
-  if (stale.length) li.push(`<li class="warn">資料過期 <b>${stale.length}</b> 則（商品資料超過 ${c.fresh} 天未更新，請重新匯入蝦皮檔）：${list(stale)}</li>`);
+  if (od.length) li.push(`<li class="bad">逾期 <b>${od.length}</b> 則（日期已過但還沒標記已發布）：${list(od)}</li>`);
+  if (stale.length) li.push(`<li class="warn">資料過期 <b>${stale.length}</b> 則（請重新匯入蝦皮檔）：${list(stale)}</li>`);
   if (rk.length) li.push(`<li class="warn">風險標記 <b>${rk.length}</b> 則：${list(rk)}</li>`);
   if (!items.length) li.push('<li class="warn">還沒有商品，請先到「商品分析」匯入蝦皮商品檔。</li>');
+  else if (!weekSlots(ws, c).length && we >= wkStart(today())) li.push(`<li class="muted">${wn}的發文日都已經過了，請點下週的日期查看建議。</li>`);
   else if (weekSlots(ws, c).length && cnt < c.perWeek) {
-    const g = nextFill(ws, we, c);
-    li.push(`<li class="warn">本週只排入 ${cnt} 則，少於目標 ${c.perWeek} 則（${c.fill === 'auto' ? 'B' : c.minG} 級以上、資料 ${c.fresh} 天內、無風險標記、不在冷卻期的商品不足）。${g ? `<button type="button" data-act="calFill" data-g="${g}">本週補入 ${g} 級商品</button>` : ''}</li>`);
+    const g = c.fill === 'auto' ? '' : nextFill(ws, we, c);
+    li.push(`<li class="warn">${wn}只排入 ${cnt} 則，少於目標 ${c.perWeek} 則。原因：${esc(shortWhy(ws, c))}。${g ? `<button type="button" data-act="calFill" data-g="${g}">補入 ${g} 級商品</button>` : ''}</li>`);
   }
-  return `<ul class="cal-alerts">${li.join('')}</ul>`;
+  return `<div class="cal-sum"><span>${wn}：</span><span class="pill st-set">已排定 ${pend.length}</span><span class="pill st-sug">建議 ${sugs.length}</span><span class="pill st-done">已發布 ${wk.filter(({ p }) => p.st === 'done').length}</span>${od.length ? `<span class="pill od">逾期 ${od.length}</span>` : ''}</div>${li.length ? `<ul class="cal-alerts">${li.join('')}</ul>` : ''}`;
 }
+function planBtns(p, i, pid) {
+  if (p.st === 'sug') return `<button type="button" class="pri" data-act="calSet" data-pid="${pid}">確定排定</button>`;
+  const copyB = i.aiText ? `<button type="button" data-act="viewCopy" data-id="${esc(i.id)}">查看文案</button>` : `<button type="button" data-act="itemAI" data-id="${esc(i.id)}">產生文案</button>`;
+  if (p.st === 'set') return `<button type="button" class="pri" data-act="calDone" data-pid="${pid}">標記已發布</button>${copyB}<button type="button" data-act="calUnset" data-pid="${pid}">取消排定</button>`;
+  return `${copyB}<button type="button" data-act="calUndone" data-pid="${pid}">取消已發布</button>`;
+}
+const delBtn = (pid) => `<button type="button" class="ghost del" data-act="calDel" data-pid="${pid}" aria-label="刪除">刪除</button>`;
 function calCard({ p, i }, pick = false) {
   const od = overdue(p), rk = risks(i), c = CS(), pid = esc(p.id), open = isOpen(p);
   return `<article class="ccard st-${esc(p.st)}${od ? ' od' : ''}"${open ? ' draggable="true"' : ''} data-pid="${pid}" id="cp-${pid}">
@@ -203,18 +212,50 @@ function calCard({ p, i }, pick = false) {
     <p class="cc-d">${pick ? `📅 ${esc(fmtMD(p.d))} ` : ''}${p.st === 'done' ? `✓ 發布於 ${esc(fmtDT(p.at))}` : p.t ? `⏰ ${esc(p.t)} <span class="cc-tw">${esc(p.tw || '')}</span>` : '<span class="muted">⏰ 未排時間</span>'}</p>
     <p class="cc-r">${esc(p.r || '')}</p>
     ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}${open && dataAge(i) > c.fresh ? `<p class="cc-warn">⚠ 商品資料 ${dataAge(i)} 天未更新</p>` : ''}
-    <div class="cc-acts">${p.st === 'sug' ? `<button type="button" class="pri" data-act="calSet" data-pid="${pid}">確定排定</button>` : p.st === 'set' ? `<button type="button" data-act="calUnset" data-pid="${pid}">取消排定</button>` : ''}${open ? `<button type="button" class="ghost" data-act="calTime" data-pid="${pid}">管理時間</button>` : ''}</div>
+    <div class="cc-acts">${planBtns(p, i, pid)}${open ? `<button type="button" class="ghost" data-act="calTime" data-pid="${pid}">管理時間</button>` : ''}${delBtn(pid)}</div>
   </article>`;
 }
-function weekHtml(ws) {
-  const all = allPlans(), td = today(), c = CS();
-  return `<p class="hint">「確定排定」會把商品加入發布清單，「取消排定」會移出；在發布清單產生文案、標記已發布，日曆會同步。發文時間會依 AI 文案的建議時段自動帶入。電腦版可拖曳卡片改日期，或按「管理時間」修改。灰底日期不是預設發文日。</p><div class="cal-week">${[...Array(7)].map((_, k) => {
-    const d = addD(ws, k), list = all.filter(({ p }) => p.d === d).sort(byGrade);
-    return `<section class="cal-day${d === td ? ' today' : ''}${c.days.includes(pd(d).getDay()) ? '' : ' off'}${d < td ? ' past' : ''}" data-day="${d}">
-      <h3>${esc(fmtMD(d))}${d === td ? ' <span class="tag">今天</span>' : ''}</h3>
-      ${list.map((x) => calCard(x)).join('')}
-      <button type="button" class="ghost add" data-act="calAdd" data-d="${d}">＋ 新增</button></section>`;
-  }).join('')}</div>`;
+// 同一天依時間排序（沒有時間的放後面），再依等級
+const byTime = (a, b) => String(a.p.st === 'done' ? fmtDT(a.p.at).slice(11) : a.p.t || '99').localeCompare(String(b.p.st === 'done' ? fmtDT(b.p.at).slice(11) : b.p.t || '99')) || byGrade(a, b);
+// 月曆（像手機的日曆）：上方整個月、每天用小圓點表示排程，點一天在下方看當天清單
+function monthHtml() {
+  const c = CS(), td = today(), m0 = `${calMonth}-01`, d0 = pd(m0), start = wkStart(m0);
+  const mEnd = ymd(new Date(d0.getFullYear(), d0.getMonth() + 1, 0)), rows = Math.ceil((diffD(mEnd, start) + 1) / 7), by = {};
+  allPlans().forEach((x) => { (by[x.p.d] = by[x.p.d] || []).push(x); });
+  const cell = (d) => {
+    const list = (by[d] || []).sort(byTime), cls = `${d.slice(0, 7) !== calMonth ? ' oth' : ''}${d === td ? ' td' : ''}${d === calSel ? ' sel' : ''}${c.days.includes(pd(d).getDay()) ? '' : ' off'}`;
+    return `<button type="button" class="mc${cls}" data-act="calPick" data-d="${d}" data-day="${d}" aria-label="${esc(fmtMD(d))}，${list.length} 則" aria-pressed="${d === calSel}">
+      <span class="mn">${pd(d).getDate()}</span>
+      <span class="mdots">${list.slice(0, 4).map(({ p }) => `<i class="dot st-${esc(p.st)}${overdue(p) ? ' od' : ''}"></i>`).join('')}${list.length > 4 ? '<b>+</b>' : ''}</span>
+      <span class="mt">${list.slice(0, 3).map(({ p, i }) => `<span class="mi st-${esc(p.st)}${overdue(p) ? ' od' : ''}">${p.t && p.st !== 'done' ? `${esc(p.t)} ` : ''}${esc(i.name.slice(0, 14))}</span>`).join('')}${list.length > 3 ? `<span class="more">還有 ${list.length - 3} 則</span>` : ''}</span></button>`;
+  };
+  return `<div class="month">
+    <div class="mh">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
+    <div class="mg">${[...Array(rows * 7)].map((_, k) => cell(addD(start, k))).join('')}</div>
+    <p class="legend"><span><i class="dot st-sug"></i>建議</span><span><i class="dot st-set"></i>已排定</span><span><i class="dot st-done"></i>已發布</span><span><i class="dot od"></i>逾期</span><span class="muted">灰色日期不是發文日</span></p>
+  </div>${agendaHtml(calSel)}`;
+}
+function agendaHtml(d) {
+  const list = allPlans().filter(({ p }) => p.d === d).sort(byTime), dd = pd(d);
+  return `<section class="agenda" aria-label="當天排程">
+    <div class="ag-head"><h2>${dd.getMonth() + 1} 月 ${dd.getDate()} 日（${WD[dd.getDay()]}）${d === today() ? ' <span class="tag">今天</span>' : ''}</h2><button type="button" data-act="calAdd" data-d="${d}">＋ 新增</button></div>
+    ${list.length ? list.map(agItem).join('') : `<p class="empty">這天沒有排程${CS().days.includes(dd.getDay()) ? '' : '（不是預設發文日）'}。</p>`}
+    <p class="hint">日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開。確定排定後可在這裡產生文案、發文後按「標記已發布」。時間依 AI 文案的建議時段自動帶入，電腦版可把下方項目拖到月曆上的其他日期。</p>
+  </section>`;
+}
+function agItem({ p, i }) {
+  const od = overdue(p), open = isOpen(p), pid = esc(p.id), rk = risks(i), c = CS();
+  const t = p.st === 'done' ? fmtDT(p.at).slice(11) || '✓' : p.t || '--:--';
+  return `<article class="ag st-${esc(p.st)}${od ? ' od' : ''}"${open ? ' draggable="true"' : ''} data-pid="${pid}" id="cp-${pid}">
+    <div class="ag-t">${esc(t)}</div>
+    <div class="ag-b">
+      <div class="ag-n">${esc(i.name)}</div>
+      <div class="ag-m"><span class="pill st-${esc(p.st)}${od ? ' od' : ''}">${od ? '逾期' : PST[p.st]}</span><span class="grade g${esc(p.g)}">${esc(p.g)}</span>${p.fill ? '<span class="tag">補位</span>' : ''}<span class="muted">${esc(p.st === 'done' ? '已發布' : p.tw || '未排時間')}</span></div>
+      <p class="cc-r">${esc(p.r || '')}</p>
+      ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}${open && dataAge(i) > c.fresh ? `<p class="cc-warn">⚠ 商品資料 ${dataAge(i)} 天未更新</p>` : ''}
+      <div class="cc-acts">${planBtns(p, i, pid)}${open ? `<button type="button" class="ghost" data-act="calTime" data-pid="${pid}">管理時間</button>` : ''}${delBtn(pid)}</div>
+    </div>
+  </article>`;
 }
 function listHtml(ws, we) {
   const wk = allPlans().filter(({ p }) => p.d >= ws && p.d <= we);
@@ -279,16 +320,15 @@ function calAdd(day) {
   if (!list.length) { toast('還沒有商品，請先匯入'); return; }
   d.innerHTML = `<form method="dialog" id="fAdd"><h2>新增 ${esc(fmtMD(day))} 的發文</h2>
     <label>商品<select name="id">${list.map((i) => `<option value="${esc(i.id)}">${esc(i.grade)}｜${esc(i.name.slice(0, 50))}${risks(i).length ? '（⚠ 有風險標記）' : ''}</option>`).join('')}</select></label>
-    <p class="hint">手動新增不受等級、冷卻期限制，會直接「確定排定」並加入發布清單。</p>
+    <p class="hint">手動新增不受等級、冷卻期限制，會直接「確定排定」（不會加入發布清單）。</p>
     <div class="btns"><button value="cancel" formnovalidate class="ghost">取消</button><button value="ok" class="pri">新增</button></div></form>`;
   d.returnValue = '';
   d.onclose = () => {
     d.onclose = null; if (d.returnValue !== 'ok') return;
     const i = items.find((x) => x.id === new FormData($('#fAdd')).get('id')); if (!i) return;
     const H = heatMap(), { P, ev } = prioOf(i, day, H);
-    if (INQ(i)) plansOf(i).filter((x) => x.st === 'set').forEach((x) => unsetPlan(i, x));
     const p = { id: uid(), d: day, st: 'set', p: P, g: i.grade, r: `手動新增｜${reasonOf({ i, ev }, '', H)}`, fill: false, m: 1, man: 1 };
-    plansOf(i).push(p); queue(i); save.i(); renderCal(); toast('已新增並加入發布清單');
+    plansOf(i).push(p); save.i(); renderCal(); toast('已新增到日曆');
   };
   if (!d.open) d.showModal();
 }
@@ -311,30 +351,42 @@ function evEdit(id) {
 }
 function calJump(pid) {
   const f0 = findPlan(pid); if (!f0) return;
-  calWeek = wkStart(f0.p.d); if (calTab !== 'list') calTab = 'week'; else calFilter = 'all';
+  calSel = f0.p.d; calMonth = calSel.slice(0, 7); if (calTab === 'list') calFilter = 'all'; else calTab = 'month';
   renderCal();
   const el = document.getElementById('cp-' + pid);
   if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1800); }
 }
+const pickDay = (d) => { calSel = d; calMonth = d.slice(0, 7); };
 
 /* ---------- 事件 ---------- */
 Object.assign(ACT, {
   calTab(b) { calTab = b.dataset.t; renderCal(); },
-  calPrev() { calWeek = addD(calWeek, -7); renderCal(); },
-  calNext() { calWeek = addD(calWeek, 7); renderCal(); },
-  calToday() { calWeek = curWeek(); renderCal(); },
+  calPrev() { if (calTab === 'month') { const d = pd(`${calMonth}-01`); d.setMonth(d.getMonth() - 1); pickDay(ymd(d)); } else pickDay(addD(calSel, -7)); renderCal(); },
+  calNext() { if (calTab === 'month') { const d = pd(`${calMonth}-01`); d.setMonth(d.getMonth() + 1); pickDay(ymd(d)); } else pickDay(addD(calSel, 7)); renderCal(); },
+  calToday() { initSel(); renderCal(); },
+  calPick(b) { pickDay(b.dataset.d); renderCal(); if (matchMedia('(max-width:760px)').matches) document.querySelector('.agenda')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  calDel(b) {
+    const f0 = findPlan(b.dataset.pid); if (!f0) return;
+    const { p, i } = f0;
+    const msg = p.st === 'set' ? `刪除「${i.name.slice(0, 20)}」這則排程？` : p.st === 'done' ? '刪除這筆已發布紀錄？' : `刪除「${i.name.slice(0, 20)}」這則建議？這一週不會再排入這件商品。`;
+    if (!confirm(msg)) return;
+    i.plans = plansOf(i).filter((x) => x !== p);
+    if (p.st !== 'done') i.calSkip = addD(wkStart(p.d), 6) > (i.calSkip || '') ? addD(wkStart(p.d), 6) : i.calSkip;
+    save.i(); renderCal(); toast('已刪除');
+  },
   calRegen() {
-    if (!confirm('重新產生會換掉本週還沒動過的「建議」卡片（已排定、已發布與你改過的卡片會保留），確定嗎？')) return;
+    const c = CS(), wn = weekName(calWeek);
+    if (!weekSlots(calWeek, c).length) { toast(`${wn}的發文日都已經過了，請在月曆點下週的日期再產生`); return; }
+    if (!confirm(`重新產生${wn}的建議？還沒「確定排定」的建議會重新排，已排定與已發布的會保留。`)) return;
     const r = planWeek(calWeek); S.calGen = { ...(S.calGen || {}), [calWeek]: GEN_V }; save.s(); save.i(); renderCal();
-    toast(`已產生 ${r.added} 則建議${r.short ? `，還少 ${r.short} 則` : ''}`);
+    const we = addD(calWeek, 6), wk = allPlans().filter(({ p }) => p.d >= calWeek && p.d <= we);
+    toast(`${wn}：建議 ${wk.filter(({ p }) => p.st === 'sug').length} 則、已排定 ${wk.filter(({ p }) => p.st === 'set').length} 則${r.short ? `，還少 ${r.short} 則（原因見上方提醒）` : ''}`);
   },
   calFill(b) { const r = genWeek(calWeek, b.dataset.g); save.i(); renderCal(); toast(r.added ? `已補入 ${r.added} 件 ${b.dataset.g} 級商品` : `沒有可補入的 ${b.dataset.g} 級商品`); },
-  calSet(b) {
-    const f0 = findPlan(b.dataset.pid); if (!f0) return;
-    if (INQ(f0.i)) plansOf(f0.i).filter((x) => x.st === 'set' && x !== f0.p).forEach((x) => unsetPlan(f0.i, x));
-    Object.assign(f0.p, { st: 'set', m: 1 }); queue(f0.i); save.i(); renderCal(); toast('已確定排定，並加入發布清單');
-  },
-  calUnset(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; unsetPlan(f0.i, f0.p); if (INQ(f0.i)) setStatus(f0.i, 'watch'); save.i(); renderCal(); toast('已取消排定，並移出發布清單'); },
+  calSet(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; Object.assign(f0.p, { st: 'set', m: 1 }); save.i(); renderCal(); toast('已確定排定'); },
+  calUnset(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; unsetPlan(f0.i, f0.p); save.i(); renderCal(); toast('已取消排定'); },
+  calDone(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; Object.assign(f0.p, { st: 'done', at: new Date().toISOString(), m: 1 }); save.i(); renderCal(); toast(`已標記發布（${fmtDT(f0.p.at)}）`); },
+  calUndone(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; Object.assign(f0.p, { st: 'set', at: '', m: 1 }); save.i(); renderCal(); toast('已取消已發布'); },
   calTime(b) { calTime(b.dataset.pid); },
   async calAITime(b) {
     const ws = calWeek, we = addD(ws, 6), list = allPlans().filter(({ p }) => isOpen(p) && p.d >= ws && p.d <= we && p.d >= today() && p.tw !== '手動');   // 手動設定的時間不覆蓋
@@ -356,9 +408,9 @@ Object.assign(ACT, {
   calPickNone() { calPicked.clear(); renderCal(); },
   calBatch(b) {
     const sel = allPlans().filter(({ p }) => calPicked.has(p.id)), op = b.dataset.op;
-    if (op === 'set') sel.filter(({ p }) => p.st === 'sug').forEach(({ p, i }) => { if (!INQ(i)) { Object.assign(p, { st: 'set', m: 1 }); queue(i); } });
-    else if (op === 'unset') sel.filter(({ p }) => p.st === 'set').forEach(({ p, i }) => { unsetPlan(i, p); if (INQ(i)) setStatus(i, 'watch'); });
-    calPicked.clear(); save.i(); renderCal(); toast('已更新，發布清單已同步');
+    if (op === 'set') sel.filter(({ p }) => p.st === 'sug').forEach(({ p }) => { Object.assign(p, { st: 'set', m: 1 }); });
+    else if (op === 'unset') sel.filter(({ p }) => p.st === 'set').forEach(({ p, i }) => { unsetPlan(i, p); });
+    calPicked.clear(); save.i(); renderCal(); toast('已更新');
   },
   evEdit(b) { evEdit(b.dataset.id || ''); },
   evDel(b) { const e = (S.events || []).find((x) => x.id === b.dataset.id); if (e && confirm(`確定刪除檔期「${e.name}」？`)) { S.events = S.events.filter((x) => x.id !== e.id); save.s(); renderCal(); } },
@@ -378,10 +430,10 @@ document.addEventListener('change', (e) => {
 });
 // 拖曳卡片改日期（電腦版）
 document.addEventListener('dragstart', (e) => { const c = e.target.closest?.('.ccard'); if (c) { e.dataTransfer.setData('text/plain', c.dataset.pid); e.dataTransfer.effectAllowed = 'move'; } });
-document.addEventListener('dragover', (e) => { const d = e.target.closest?.('.cal-day'); if (d) { e.preventDefault(); d.classList.add('drop'); } });
-document.addEventListener('dragleave', (e) => { const d = e.target.closest?.('.cal-day'); if (d && !d.contains(e.relatedTarget)) d.classList.remove('drop'); });
+document.addEventListener('dragover', (e) => { const d = e.target.closest?.('[data-day]'); if (d) { e.preventDefault(); d.classList.add('drop'); } });
+document.addEventListener('dragleave', (e) => { const d = e.target.closest?.('[data-day]'); if (d && !d.contains(e.relatedTarget)) d.classList.remove('drop'); });
 document.addEventListener('drop', (e) => {
-  const d = e.target.closest?.('.cal-day'); if (!d) return; e.preventDefault(); d.classList.remove('drop');
+  const d = e.target.closest?.('[data-day]'); if (!d) return; e.preventDefault(); d.classList.remove('drop');
   const f0 = findPlan(e.dataTransfer.getData('text/plain')); if (!f0 || !isOpen(f0.p) || f0.p.d === d.dataset.day) return;
   f0.p.d = d.dataset.day; f0.p.m = 1; save.i(); renderCal(); toast(`已改到 ${fmtMD(d.dataset.day)}`);
 });
