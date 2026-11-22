@@ -9,7 +9,7 @@ const CAL_DEF = { minG: 'A', fill: 'auto', perDay: 3, cool: 21, catCap: 40, pre:
 // 由使用者選發文日與每天篇數；每週則數＝發文日數 × 每天篇數（舊設定的每週則數換算成每天篇數）
 const CS = () => {
   const o = { ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } };
-  if (!Array.isArray(o.days) || !o.days.length) o.days = CAL_DEF.days;
+  o.days = [0, 1, 2, 3, 4, 5, 6];   // 發文日＝尋找商品時選的日期範圍內每一天
   for (const k of ['cool', 'catCap', 'pre', 'w']) o[k] = CAL_DEF[k];   // 這些固定用預設值，不提供設定
   if (!(S.cal && S.cal.perDay) && S.cal && S.cal.perWeek) o.perDay = Math.ceil(S.cal.perWeek / o.days.length);
   o.perDay = clamp(Math.round(num(o.perDay)) || 3, 1, 10);
@@ -266,14 +266,14 @@ function monthHtml() {
   return `<div class="month">
     <div class="mh">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
     <div class="mg">${[...Array(rows * 7)].map((_, k) => cell(addD(start, k))).join('')}</div>
-    <p class="legend"><span><i class="dot st-sug"></i>建議</span><span><i class="dot st-set"></i>已排定</span><span><i class="dot st-done"></i>已發布</span><span><i class="dot od"></i>逾期</span><span class="muted">灰色日期不是發文日</span></p>
+    <p class="legend"><span><i class="dot st-sug"></i>建議</span><span><i class="dot st-set"></i>已排定</span><span><i class="dot st-done"></i>已發布</span><span><i class="dot od"></i>逾期</span></p>
   </div>${agendaHtml(calSel)}`;
 }
 function agendaHtml(d) {
   const list = shownPlans().filter(({ p }) => p.d === d).sort(byTime), dd = pd(d);
   return `<section class="agenda" aria-label="當天排程">
     <div class="ag-head"><h2>${dd.getMonth() + 1} 月 ${dd.getDate()} 日（${WD[dd.getDay()]}）${d === today() ? ' <span class="tag">今天</span>' : ''}</h2><button type="button" data-act="calAdd" data-d="${d}">＋ 新增</button></div>
-    ${list.length ? list.map(agItem).join('') : `<p class="empty">這天沒有排程${CS().days.includes(dd.getDay()) ? '' : '（不是預設發文日）'}。</p>`}
+    ${list.length ? list.map(agItem).join('') : `<p class="empty">這天沒有排程。</p>`}
     <p class="hint">日曆從「商品分析」的全部商品挑選，跟發布清單無關。先排好時間、確定排定後，再在這裡產生文案，發文後按「標記已發布」。建議的日期與時間由 AI 排定，手動改過的不會再被 AI 移動；電腦版可把下方項目拖到月曆上的其他日期。</p>
   </section>`;
 }
@@ -378,11 +378,11 @@ function evEdit(id) {
 }
 function updFindInfo() {
   const f = $('#fFind'); if (!f) return;
-  const days = [...f.querySelectorAll('[name=days]:checked')].map((e) => Number(e.value)), perDay = clamp(Math.round(num(f.perDay.value)) || 0, 0, 10);
-  const c = { ...CS(), days, perDay }, from = f.from.value, to = f.to.value, el = $('#findInfo');
+  const perDay = clamp(Math.round(num(f.perDay.value)) || 0, 0, 10);
+  const c = { ...CS(), perDay }, from = f.from.value, to = f.to.value, el = $('#findInfo');
   if (!from || !to || to < from) { el.textContent = '請選擇開始與結束日期'; return; }
   const sl = rangeSlots(from, to, c);
-  el.textContent = !days.length ? '請至少勾選一個發文日。' : sl.length ? `會排在 ${sl.length} 個發文日（${days.map((d) => `週${WD[d]}`).join('、')}），每天 ${perDay} 篇，最多 ${sl.length * perDay} 篇；已有的排程會算進每天的篇數。` : '這段日期沒有勾選的發文日，請換日期或多勾幾天。';
+  el.textContent = sl.length ? `共 ${sl.length} 天，每天 ${perDay} 篇，最多 ${sl.length * perDay} 篇；已有的排程會算進每天的篇數。` : '請選擇今天以後的日期。';
 }
 function calFindDlg() {
   if (!items.length) { toast('還沒有商品，請先到「商品分析」匯入蝦皮商品檔'); return; }
@@ -392,7 +392,6 @@ function calFindDlg() {
     <p class="hint">選擇要排哪幾天的商品。系統會從「商品分析」挑出要推的商品，再由 AI 排好日期與時間放進日曆。</p>
     <div class="btns">${q.map(([l, a, b]) => `<button type="button" class="ghost" data-act="calQ" data-from="${a}" data-to="${b}">${l}</button>`).join('')}</div>
     <div class="row2"><label>開始日期<input name="from" type="date" required min="${td}" value="${from0}"></label><label>結束日期<input name="to" type="date" required min="${td}" value="${addD(from0, 6)}"></label></div>
-    <fieldset class="days"><legend>要在星期幾發文</legend>${[1, 2, 3, 4, 5, 6, 0].map((x) => `<label class="chk"><input type="checkbox" name="days" value="${x}"${CS().days.includes(x) ? ' checked' : ''}>週${WD[x]}</label>`).join('')}</fieldset>
     <label>每天發幾篇<input name="perDay" type="number" min="1" max="10" step="1" inputmode="numeric" value="${CS().perDay}"></label>
     <p class="hint" id="findInfo"></p>
     <div class="btns"><button value="cancel" formnovalidate class="ghost">取消</button><button value="ok" class="pri">開始尋找</button></div></form>`;
@@ -400,14 +399,12 @@ function calFindDlg() {
   d.onclose = () => {
     d.onclose = null; if (d.returnValue !== 'ok') return;
     const f = new FormData($('#fFind')); let from = String(f.get('from')), to = String(f.get('to'));
-    const days = f.getAll('days').map(Number);
-    if (!days.length) { toast('請至少勾選一個發文日'); calFindDlg(); return; }
-    S.cal = { ...(S.cal || {}), days, perDay: clamp(Math.round(num(f.get('perDay'))) || 3, 1, 10) }; save.s();   // 記住這次的選擇
+    S.cal = { ...(S.cal || {}), perDay: clamp(Math.round(num(f.get('perDay'))) || 3, 1, 10) }; save.s();   // 記住這次的選擇
     if (to < from) [from, to] = [to, from];
     if (from < td) from = td;
     if (diffD(to, from) > 30) { to = addD(from, 30); toast('一次最多 31 天，已調整結束日期'); }
     const c = CS();
-    if (!rangeSlots(from, to, c).length) { toast('這段日期沒有勾選的發文日，請換日期或多勾幾天'); return; }
+    if (!rangeSlots(from, to, c).length) { toast('請選擇今天以後的日期'); return; }
     const old = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= from && p.d <= to).length;
     if (old && !confirm(`這段日期已有 ${old} 則還沒確定的建議，要重新尋找嗎？（已確定排定與已發布的會保留）`)) return;
     let short = 0;
