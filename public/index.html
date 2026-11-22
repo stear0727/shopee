@@ -15,6 +15,7 @@
 <header class="top">
   <a class="brand" href="#list">選品分析</a>
   <span class="badge-off">非蝦皮官方</span>
+  <a class="sync-status sync-top" href="#settings" title="雲端同步狀態"></a>
 </header>
 
 <nav class="side" aria-label="主要導覽">
@@ -71,6 +72,12 @@
 <!-- 設定 -->
 <section id="v-settings" class="view" hidden>
   <h1 tabindex="-1">設定</h1>
+  <div class="card">
+    <h2>雲端同步（電腦與手機互通）</h2>
+    <p>狀態：<span class="sync-status"></span></p>
+    <p class="hint">打開網站、修改資料後幾秒、以及切回網頁時都會自動同步。兩台裝置都改過時逐件合併，同一件商品以最後修改的為準；在一台刪除的商品，另一台也會刪除。存取碼與自備金鑰不會同步。</p>
+    <div class="btns"><button type="button" data-act="syncNow">立即同步</button></div>
+  </div>
   <div class="card"><h2>連線狀態</h2><p id="connStatus">檢查中…</p><div class="btns"><button type="button" data-act="checkConn">重新檢查</button></div></div>
   <div class="card">
     <h2>評分權重</h2>

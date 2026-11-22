@@ -105,7 +105,10 @@ const _s = store.get('settings', {});
 const S = { accessCode: '', ownKey: '', ..._s, wv: 3, weights: _s.wv === 3 && _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
 let items = store.get('items', []);
-const save = { s: () => store.set('settings', S), i: () => store.set('items', items) };
+const save = {
+  s: () => { S.setAt = Date.now(); store.set('settings', S); if (typeof scheduleSync === 'function') scheduleSync(); },
+  i: () => { if (typeof stampItems === 'function') stampItems(); store.set('items', items); if (typeof scheduleSync === 'function') scheduleSync(); },
+};
 
 /* ========== 確定性公式 ========== */
 const priceScore = (p) => (p <= 299 ? 5 : p <= 599 ? 4 : p <= 999 ? 3 : p <= 1999 ? 2 : 1);
@@ -521,6 +524,74 @@ function wSum() {
   $('#wSum').textContent = t ? `合計 ${fmt(t)}；實際比例：${DIMS.map((d, k) => `${d.n} ${fmt(v[k] / t * 100)}%`).join('、')}` : '權重合計不能為 0';
 }
 
+/* ========== 雲端同步（電腦與手機共用同一份資料） ========== */
+// 每件商品記錄最後修改時間 mt；刪除的商品記在 tomb（墓碑），合併時以較新的版本為準
+const SYNC_SETTINGS = ['weights', 'wv', 'thr', 'bonus', 'festOn', 'alias'];
+let tomb = store.get('tomb', {}), snap = store.get('snap', null), syncAt = store.get('syncAt', 0);
+let syncing = false, syncAgain = false, syncTimer = 0, lastPull = 0;
+const hashStr = (str) => { let h = 5381; for (let k = 0; k < str.length; k++) h = ((h << 5) + h + str.charCodeAt(k)) >>> 0; return h.toString(36); };
+const hashItem = (i) => { const { mt, ...r } = i; return hashStr(JSON.stringify(r)); };
+function stampItems() {
+  const now = Date.now(), next = {};
+  for (const i of items) {
+    const h = hashItem(i);                       // 雜湊不含 mt，所以標記時間不影響比對
+    if (!snap) { if (!i.mt) i.mt = now; }        // 第一次啟用同步：既有商品記為現在
+    else if (snap[i.id] !== h) i.mt = now;       // 新增或內容有變動
+    next[i.id] = h;
+  }
+  if (snap) for (const id in snap) if (!next[id]) tomb[id] = now;
+  snap = next; store.set('snap', snap); store.set('tomb', tomb);
+}
+const syncPayload = () => ({ items, tomb, settings: { ...Object.fromEntries(SYNC_SETTINGS.map((k) => [k, S[k]])), at: S.setAt || 0 } });
+function mergeRemote(remote) {
+  if (!remote) return false;
+  let changed = false;
+  for (const [id, t] of Object.entries(remote.tomb || {})) if (!(tomb[id] >= t)) tomb[id] = t;
+  const map = new Map(items.map((i) => [i.id, i]));
+  for (const ri of remote.items || []) {
+    const li = map.get(ri.id);
+    if (!li ? !(tomb[ri.id] >= (ri.mt || 0)) : (ri.mt || 0) > (li.mt || 0)) { map.set(ri.id, ri); changed = true; }
+  }
+  for (const [id, t] of Object.entries(tomb)) { const it = map.get(id); if (it && (it.mt || 0) <= t) { map.delete(id); changed = true; } }
+  const old = Date.now() - 90 * 864e5; for (const id in tomb) if (tomb[id] < old) delete tomb[id];
+  items = [...map.values()];
+  const rs = remote.settings;
+  if (rs && (rs.at || 0) > (S.setAt || 0)) { for (const k of SYNC_SETTINGS) if (rs[k] !== undefined) S[k] = rs[k]; S.setAt = rs.at; store.set('settings', S); changed = true; }
+  // 合併進來的資料不算本機修改：直接更新快照，保留原本的修改時間
+  snap = Object.fromEntries(items.map((i) => [i.id, hashItem(i)]));
+  store.set('items', items); store.set('snap', snap); store.set('tomb', tomb);
+  return changed;
+}
+function setSyncStatus(t, bad) {
+  for (const el of $$('.sync-status')) { el.textContent = t; el.classList.toggle('err', !!bad); }
+}
+async function syncNow(retry = 0) {
+  if (location.protocol === 'file:') { setSyncStatus('本機檔案模式，未同步'); return; }
+  if (syncing) { syncAgain = true; return; }
+  syncing = true; setSyncStatus('☁ 同步中…');
+  const h = { 'Content-Type': 'application/json' }; if (S.accessCode) h['x-access-code'] = S.accessCode;
+  try {
+    const g = await fetch('/api/data', { headers: h, cache: 'no-store' });
+    const j = await g.json().catch(() => ({ ok: false, error: `HTTP ${g.status}` }));
+    if (!g.ok || !j.ok) throw Object.assign(new Error(j.error || `HTTP ${g.status}`), { status: g.status });
+    lastPull = Date.now();
+    if (mergeRemote(j.data)) route();
+    const p = await fetch('/api/data', { method: 'PUT', headers: h, body: JSON.stringify({ data: syncPayload(), base: j.at }) });
+    const pj = await p.json().catch(() => ({ ok: false, error: `HTTP ${p.status}` }));
+    if (p.status === 409 && retry < 2) { syncing = false; return syncNow(retry + 1); }
+    if (!p.ok || !pj.ok) throw Object.assign(new Error(pj.error || `HTTP ${p.status}`), { status: p.status });
+    syncAt = pj.at; store.set('syncAt', syncAt);
+    setSyncStatus(`☁ 已同步 ${fmtDT(new Date(syncAt).toISOString()).slice(5)}`);
+  } catch (e) {
+    setSyncStatus(e.status === 401 ? '☁ 未同步：需要存取碼' : e instanceof TypeError ? '☁ 離線，未同步' : `☁ 同步失敗：${e.message}`, true);
+  } finally {
+    syncing = false;
+    if (syncAgain) { syncAgain = false; scheduleSync(500); }
+  }
+}
+const scheduleSync = (ms = 2500) => { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms); };
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - lastPull > 15000) syncNow(); });
+
 /* ========== 事件 ========== */
 const go = (h) => { if (location.hash === h) route(); else location.hash = h; };
 const ACT = {
@@ -637,6 +708,7 @@ const ACT = {
   expItems() { download(`商品清單_${today()}.csv`, toCSV(items.map(flatItem), ITEM_COLS)); },
   // 設定
   checkConn,
+  syncNow() { syncNow(); },
   resetWeights() { $$('[data-sw]').forEach((e) => { e.value = DEF_W[e.dataset.sw]; }); wSum(); toast('已填入預設權重，按「儲存設定」生效'); },
   saveSettings() {
     const w = Object.fromEntries($$('[data-sw]').map((e) => [e.dataset.sw, clamp(num(e.value), 0, 100)]));
@@ -648,7 +720,7 @@ const ACT = {
     checkConn();
   },
   clearAll() {
-    if (!confirm('確定清除所有本機資料（商品清單與設定）？此動作無法復原，建議先匯出 CSV。')) return;
+    if (!confirm('確定清除這台裝置的本機資料？雲端的資料會在下次同步時重新下載回來；若要刪除所有裝置上的商品，請改用「刪除全部商品」。')) return;
     Object.keys(localStorage).filter((k) => k.startsWith('sp_')).forEach((k) => localStorage.removeItem(k));
     location.hash = '#list'; location.reload();
   },
@@ -706,3 +778,4 @@ function setNavMini(on) {
 setNavMini(!!store.get('navMini', false));
 window.addEventListener('hashchange', route);
 route();
+syncNow();

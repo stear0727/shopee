@@ -217,6 +217,8 @@ a.btn{text-decoration:none}
 .tag.pubtag{background:var(--ok);border-color:var(--ok);color:var(--card);font-weight:700}
 .save-bar{align-items:center;margin:0 0 16px}
 .pc-row.comm b{color:var(--acc);font-size:1.05rem}
+.sync-top{margin-left:auto;font-size:.8125rem;color:var(--mut);text-decoration:none;white-space:nowrap}
+.sync-status.err{color:var(--bad)}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}

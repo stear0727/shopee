@@ -1,0 +1,8 @@
+{
+  "name": "shoopee",
+  "private": true,
+  "description": "蝦皮分潤選品分析網站（Netlify Functions 相依套件）",
+  "dependencies": {
+    "@netlify/blobs": "^11.1.9"
+  }
+}
