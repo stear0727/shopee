@@ -356,7 +356,8 @@ const SORT_FN = {
 };
 /* ========== 發布清單 ========== */
 const picked = new Set(), pubPicked = new Set();
-const INQ = (i) => i.status === 'todo' || i.status === 'copy';   // 待發文、已產文案＝在發布清單中
+const INQ = (i) => i.status === 'todo' || i.status === 'copy';   // 待發文、已產文案＝在發布清單中（未發布）
+const INPUB = (i) => INQ(i) || i.status === 'done';               // 發布清單中的全部商品（含已發布）
 const pad2 = (n) => String(n).padStart(2, '0');
 const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 // 改狀態時一併處理發布時間：改成「已發布」自動記錄現在時間，改離「已發布」則清除
@@ -370,7 +371,10 @@ function setStatus(i, s) {
 }
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
-function updPubBtns() { for (const [id, l] of [['pubDoneBtn', '標記已發布'], ['pubOutBtn', '移出清單']]) { const b = $('#' + id); if (b) { b.textContent = `${l}（${pubPicked.size}）`; b.disabled = !pubPicked.size; } } }
+function updPubBtns() {
+  const sel = items.filter((i) => pubPicked.has(i.id)), nd = sel.filter(INQ).length, dn = sel.filter((i) => i.status === 'done').length;
+  for (const [id, l, c] of [['pubDoneBtn', '標記已發布', nd], ['pubUndoBtn', '取消已發布', dn], ['pubOutBtn', '移出清單', sel.length]]) { const b = document.getElementById(id); if (b) { b.textContent = l + '（' + c + '）'; b.disabled = !c; } }
+}
 // 產生文案視窗裡的「節慶活動」區塊：預設帶入近三週節慶，可修改或取消
 const festForm = () => `<div class="fest-box">
   <div class="checks"><label><input type="checkbox" id="festOn"${S.festOn !== false ? ' checked' : ''}>加一段節慶活動文案</label></div>
@@ -378,7 +382,7 @@ const festForm = () => `<div class="fest-box">
   <p class="hint">已依現在時間（${fmtDT(new Date().toISOString()).slice(0, 10)}）自動帶入未來三週的節慶與電商檔期，可直接修改（例如補上優惠內容與時間）；AI 只會使用這裡提供的活動細節，商品不適合時不會硬寫。<button type="button" class="link" data-act="festFill">重新帶入近期節慶</button></p>
 </div>`;
 function renderPub() {
-  for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INQ(i)) pubPicked.delete(id); }
+  for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INPUB(i)) pubPicked.delete(id); }
   // 待發布與已發布放在同一個清單，標記已發布後留在原位置（依加入時間排序）
   const all = items.filter((i) => INQ(i) || i.status === 'done').sort((a, b) => String(a.queuedAt || a.publishedAt || a.createdAt).localeCompare(String(b.queuedAt || b.publishedAt || b.createdAt)));
   $('#pubQueueN').textContent = all.filter(INQ).length; $('#pubDoneN').textContent = all.filter((i) => i.status === 'done').length;
@@ -388,7 +392,7 @@ function renderPub() {
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
   return `<article class="pc pub${done ? ' isdone' : ''}">
-    <div class="pc-top"><span>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : `<label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>`}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
+    <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}${i.aiFest ? `｜節慶：${esc(i.aiFest.length > 30 ? i.aiFest.slice(0, 30) + '…' : i.aiFest)}` : ''}</div>` : ''}
@@ -541,14 +545,18 @@ const ACT = {
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
   festFill() { $('#festText').value = festAuto(); toast(festAuto() ? '已帶入近三週節慶' : '近三週沒有節慶'); },
-  pubAll() { items.filter(INQ).forEach((i) => pubPicked.add(i.id)); renderPub(); },
+  pubAll() { items.filter(INPUB).forEach((i) => pubPicked.add(i.id)); renderPub(); },
   pubNone() { pubPicked.clear(); renderPub(); },
   pubDoneSel() {
     const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
     list.forEach((i) => setStatus(i, 'done')); pubPicked.clear(); save.i(); renderPub(); toast(`已標記 ${list.length} 件為已發布（${fmtDT(new Date().toISOString())}）`);
   },
+  pubUndoSel() {
+    const list = items.filter((i) => pubPicked.has(i.id) && i.status === 'done'); if (!list.length) return;
+    list.forEach((i) => setStatus(i, i.aiText ? 'copy' : 'todo')); pubPicked.clear(); save.i(); renderPub(); toast(`已取消 ${list.length} 件的已發布`);
+  },
   pubOutSel() {
-    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
+    const list = items.filter((i) => pubPicked.has(i.id) && INPUB(i)); if (!list.length) return;
     if (!confirm(`將 ${list.length} 件移出發布清單？`)) return;
     list.forEach((i) => setStatus(i, 'watch')); pubPicked.clear(); save.i(); renderPub();
   },
