@@ -904,9 +904,20 @@ function shopeeGrab(SITE) {
   const os = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (...a) { this.addEventListener('load', function () { try { if ((this.getResponseHeader('content-type') || '').includes('json')) feed(this.responseType === '' || this.responseType === 'text' ? this.responseText : this.response); } catch (e) { /* 略過 */ } }); return os.apply(this, a); };
   ['__INITIAL_STATE__', '__NEXT_DATA__', '__APOLLO_STATE__'].forEach((k) => { if (window[k]) feed(window[k]); });
+  /* 補抓點書籤前已載入的資料（例如第一頁）：依瀏覽器的資源紀錄重新讀取一次（僅限蝦皮網域的 GET 資料網址） */
+  try {
+    const seen = new Set();
+    performance.getEntriesByType('resource')
+      .filter((e) => (e.initiatorType === 'fetch' || e.initiatorType === 'xmlhttprequest') && /(^|\.)shopee\.(tw|com)$/.test(new URL(e.name).hostname))
+      .slice(-40)
+      .forEach((e) => {
+        if (seen.has(e.name)) return; seen.add(e.name);
+        of(e.name, { credentials: 'include' }).then((r) => (r.ok && (r.headers.get('content-type') || '').includes('json') ? r.text() : '')).then((t) => { if (t) feed(t); }).catch(() => {});
+      });
+  } catch (e) { /* 瀏覽器不支援資源紀錄 */ }
   document.querySelectorAll('script[type="application/json"]').forEach((s) => feed(s.textContent));
   box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#fff;color:#1f1a17;border:2px solid #c2410c;border-radius:14px;padding:12px 14px;font:15px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:280px';
-  box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">📥 蝦皮擷取中</div><div>已擷取 <b>0</b> 件商品</div><div style="font-size:13px;color:#625a53;margin:4px 0 8px">請往下捲動、換頁或搜尋，件數會增加</div><button data-s style="background:#c2410c;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">送到選品網站</button> <button data-x style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">隱藏</button>';
+  box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">📥 蝦皮擷取中</div><div>已擷取 <b>0</b> 件商品</div><div style="font-size:13px;color:#625a53;margin:4px 0 8px">請往下捲動、換頁或搜尋，件數會增加。第一頁沒抓到的話，切到第 2 頁再回第 1 頁。</div><button data-s style="background:#c2410c;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">送到選品網站</button> <button data-x style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">隱藏</button>';
   box.querySelector('[data-x]').onclick = () => { box.style.display = 'none'; };
   box.querySelector('[data-s]').onclick = () => {
     if (!items.size) { alert('還沒擷取到商品：請先往下捲動或換頁再試'); return; }
