@@ -152,7 +152,8 @@ let calAIErr = '', calAIProg = '';
 async function calAIPlan(from, to, btn = null, auto = false) {
   const key = `${from}~${to}`; if (calAIBusy.has(key)) return;
   const c = CS(), slots = rangeSlots(from, to, c);
-  const list = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= from && p.d <= to && p.d >= today() && !p.md && p.tw !== '手動');
+  // 等待中的（pend）一定要排；其他建議則不動手動改過的
+  const list = allPlans().filter(({ p }) => p.d >= from && p.d <= to && p.d >= today() && (p.pend || (p.st === 'sug' && !p.md && p.tw !== '手動')));
   if (!slots.length || !list.length) { if (!auto) toast('這段日期沒有需要 AI 排程的建議（手動改過的會保留）'); return; }
   const ids = new Set(list.map(({ p }) => p.id)), cnt = {};
   allPlans().forEach(({ p }) => { if (p.d >= from && p.d <= to && !ids.has(p.id)) cnt[p.d] = (cnt[p.d] || 0) + 1; });
@@ -161,9 +162,11 @@ async function calAIPlan(from, to, btn = null, auto = false) {
   if (btn) btn.disabled = true;
   let n = 0;
   try {
-    for (let k = 0; k < list.length; k += AI_BATCH) {
-      const part = list.slice(k, k + AI_BATCH);
-      calAIProg = `${Math.min(k + AI_BATCH, list.length)}／${list.length}`; if (btn) btn.textContent = `AI 排程中 ${calAIProg}`;
+    // 第一輪全部送；AI 漏回的再補送一輪
+    for (let round = 0, todo = list; round < 2 && todo.length; round++, todo = todo.filter(({ p }) => p.pend)) {
+    for (let k = 0; k < todo.length; k += AI_BATCH) {
+      const part = todo.slice(k, k + AI_BATCH);
+      calAIProg = round ? `補排漏掉的 ${Math.min(k + AI_BATCH, todo.length)}／${todo.length}` : `${Math.min(k + AI_BATCH, todo.length)}／${todo.length}`; if (btn) btn.textContent = `AI 排程中 ${calAIProg}`;
       redraw();
       const items_ = part.map(({ p, i }) => { const e = slots.map((d) => evOf(i, d, c)).find(Boolean); return { id: p.id, name: i.name, category: i.category, price: num(i.price), event: e ? e.name : '', evFrom: e ? addD(e.start, -c.pre) : '' }; });
       const j = await ai('schedule', { items: items_, perDay: c.perDay, dates: slots.map((d) => ({ date: d, weekday: WD[pd(d).getDay()], used: cnt[d] || 0 })) });
@@ -179,7 +182,10 @@ async function calAIPlan(from, to, btn = null, auto = false) {
       }
       save.i();
     }
-    toast(n ? `AI 已排好 ${n} 則的日期與時間` : 'AI 沒有回傳可用的排程，請稍後按「AI 重新排程」');
+    }
+    const left = list.filter(({ p }) => p.pend).length;
+    if (left) calAIErr = `AI 沒有回傳其中 ${left} 件的排程`;
+    toast(n ? `AI 已排好 ${n} 則的日期與時間${left ? `；還有 ${left} 件 AI 沒回傳，可按「AI 重新排程」` : ''}` : 'AI 沒有回傳可用的排程，請稍後按「AI 重新排程」');
   } catch (e) {
     calAIErr = e.status === 429 ? 'Gemini 額度用完或請求太頻繁，請稍後再試' : e.status === 502 || e.status === 504 ? 'AI 回應太慢（逾時），請再按一次「AI 重新排程」' : e.message || 'AI 排程失敗';
     save.i();
@@ -189,6 +195,16 @@ async function calAIPlan(from, to, btn = null, auto = false) {
     if (btn) { btn.disabled = false; btn.textContent = label; }
     redraw();
   }
+}
+
+// 上次 AI 排程沒跑完（例如中途重新整理或離開頁面）留下等待中的商品：打開日曆時自動接著排（每次開頁面只自動一次）
+let calAIResumed = false;
+function calAIResume() {
+  if (calAIResumed || calAIBusy.size) return;
+  const ds = allPlans().filter(({ p }) => p.pend && p.d >= today()).map(({ p }) => p.d).sort();
+  if (!ds.length) return;
+  calAIResumed = true;
+  setTimeout(() => calAIPlan(ds[0], ds[ds.length - 1], null, true), 0);
 }
 
 /* ---------- 畫面 ---------- */
@@ -202,6 +218,7 @@ function renderCal() {
   if (!calSel) initSel();
   calWeek = wkStart(calSel);
   if (calReconcile()) save.i();
+  calAIResume();
   const c = CS(), ws = calWeek, we = addD(ws, 6);
   $$('#calTabs [data-t]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.t === calTab)));
   const wk = calTab === 'month' || calTab === 'list';
