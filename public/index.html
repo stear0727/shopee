@@ -32,7 +32,11 @@
   <h1 tabindex="-1">商品分析</h1>
   <div class="card">
     <h2>匯入蝦皮商品檔（CSV／Excel）</h2>
-    <p class="hint">在蝦皮分潤後台用「批量取得商品連結」匯出檔案後選檔匯入，可一次選多個檔案。支援 .csv 與 .xlsx（用 Excel 開過再存檔也可以）。會自動分類並保留推廣連結；重複匯入同一商品只更新價格與銷量，不會蓋掉你改過的狀態與文案。</p>
+    <ul class="hint imp-list">
+      <li>在蝦皮分潤後台用「批量取得商品連結」匯出檔案後選檔匯入</li>
+      <li>可一次選多個檔案</li>
+      <li>支援 .csv 與 .xlsx（用 Excel 開過再存檔也可以）</li>
+    </ul>
     <label class="btn pri">選擇蝦皮匯出的檔案<input class="vh" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-imp="items" multiple></label>
   </div>
   <div class="tabs cat-tabs" id="catChips" role="tablist" aria-label="選擇類別"></div>

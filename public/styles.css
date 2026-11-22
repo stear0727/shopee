@@ -225,6 +225,7 @@ a.btn{text-decoration:none}
 .sync-status.err{color:var(--bad)}
 .sync-status.warn{color:var(--warn);font-weight:700}
 .sync-top.warn{border-color:var(--warn)}
+.imp-list{margin:4px 0 12px;padding-left:1.2em}.imp-list li{margin:2px 0}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
