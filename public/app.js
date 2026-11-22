@@ -878,7 +878,12 @@ function shopeeGrab(SITE) {
   const nDisc = (v) => { let n = Math.abs(toNum(v)); if (!(n > 0)) return ''; if (n < 1) n *= 100; return n < 100 ? Math.round(n) : ''; };
   const nRating = (v) => { const n = toNum(isObj(v) ? v.rating_star : v); return n > 0 && n <= 5 ? Math.round(n * 10) / 10 : ''; };
   const view = (o) => { const v = { ...o }; for (const c of Object.values(o)) if (isObj(c)) for (const [k, x] of Object.entries(c)) if (v[k] === undefined && typeof x !== 'object') v[k] = x; if (isObj(o.item_rating) && v.rating_star === undefined) v.rating_star = o.item_rating.rating_star; return v; };
+  /* 擷取結果存在蝦皮網站的本機儲存空間：換頁、重新整理、開新分頁後再點書籤即可接續 */
+  const KEY = 'spg_items_v1';
   const items = new Map();
+  try { JSON.parse(localStorage.getItem(KEY) || '[]').forEach((p) => items.set(p.id, p)); } catch (e) { /* 無法讀取 */ }
+  let saveT = 0;
+  const persist = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify([...items.values()].slice(-2000))); } catch (e) { /* 空間不足 */ } }, 400); };
   let budget = 0;
   const walk = (node, d, out) => {
     if (budget-- <= 0 || d > 10 || !node || typeof node !== 'object') return;
@@ -892,11 +897,17 @@ function shopeeGrab(SITE) {
     for (const c of Object.values(node)) if (c && typeof c === 'object') walk(c, d + 1, out);
   };
   const box = document.createElement('div');
+  const upd = () => {
+    const n = box.querySelector('[data-n]'), r = box.querySelector('[data-r]');
+    if (n) n.textContent = items.size;
+    if (r) r.textContent = [...items.values()].filter((p) => p.commissionRate !== '' && p.commissionRate != null).length;
+    persist();
+  };
   const feed = (t) => {
     try {
       const j = typeof t === 'string' ? JSON.parse(t) : t, out = []; budget = 50000; walk(j, 0, out);
       for (const p of out) { const o = items.get(p.id); if (!o) items.set(p.id, p); else for (const k in p) if (p[k] !== '' && o[k] === '') o[k] = p[k]; }
-      if (out.length) box.querySelector('b').textContent = items.size;
+      if (out.length) upd();
     } catch (e) { /* 非 JSON */ }
   };
   const of = window.fetch;
@@ -937,20 +948,36 @@ function shopeeGrab(SITE) {
     const it = items.get(key);
     it.commissionRate = social !== '' ? social : Math.max(video || 0, live || 0);
     it.channelRates = '短影音 ' + (video === '' ? '?' : video) + '%／社群 ' + (social === '' ? '?' : social) + '%／直播 ' + (live === '' ? '?' : live) + '%';
-    box.querySelector('b').textContent = items.size;
+    upd();
     const n = box.querySelector('i'); if (n) n.textContent = '已讀取分潤：' + (it.productName || '').slice(0, 16) + '… ' + it.commissionRate + '%';
   };
-  setInterval(scanDetail, 1500);
+  const iv = setInterval(scanDetail, 1500);
   box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#fff;color:#1f1a17;border:2px solid #c2410c;border-radius:14px;padding:12px 14px;font:15px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:280px';
-  box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">📥 蝦皮擷取中</div><div>已擷取 <b>0</b> 件商品</div><div style="font-size:13px;color:#625a53;margin:4px 0 8px">請往下捲動、換頁或搜尋，件數會增加。第一頁沒抓到的話，切到第 2 頁再回第 1 頁。<br>分潤比例要點進商品詳情頁才會讀到（在同一個分頁點進去再返回）。</div><i style="display:block;font-size:13px;color:#15803d;margin-bottom:6px"></i><button data-s style="background:#c2410c;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">送到選品網站</button> <button data-x style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">隱藏</button>';
-  box.querySelector('[data-x]').onclick = () => { box.style.display = 'none'; };
+  const B = 'border-radius:8px;padding:7px 10px;font:inherit;font-size:14px;cursor:pointer;margin:2px;';
+  box.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700"><span>📥 擷取中｜<b data-n>0</b> 件（有分潤 <b data-r>0</b>）</span><button data-min title="縮小／展開" style="' + B + 'background:#fff;border:1px solid #ccc;padding:2px 10px">－</button></div>'
+    + '<div data-body><div style="font-size:13px;color:#625a53;margin:6px 0">往下捲動、換頁或搜尋，件數會增加；第一頁沒抓到就切到第 2 頁再回來。<br>分潤比例要點進商品詳情頁才讀得到（可開新分頁，在新分頁再點一次書籤）。<br>資料會自動保存，重新整理後再點書籤即可接續。</div>'
+    + '<i style="display:block;font-size:13px;color:#15803d;margin-bottom:6px"></i>'
+    + '<button data-s style="' + B + 'background:#c2410c;color:#fff;border:0">送到選品網站</button>'
+    + '<button data-clr style="' + B + 'background:#fff;border:1px solid #ccc">清空</button>'
+    + '<button data-stop style="' + B + 'background:#fff;color:#b91c1c;border:1px solid #b91c1c">停止擷取</button></div>';
+  const body = box.querySelector('[data-body]');
+  box.querySelector('[data-min]').onclick = () => { const h = body.style.display === 'none'; body.style.display = h ? 'block' : 'none'; box.querySelector('[data-min]').textContent = h ? '－' : '＋'; };
   box.querySelector('[data-s]').onclick = () => {
     if (!items.size) { alert('還沒擷取到商品：請先往下捲動或換頁再試'); return; }
     const s = btoa(unescape(encodeURIComponent(JSON.stringify([...items.values()].slice(0, 1000)))));
     window.open(SITE + '/#import=' + encodeURIComponent(s), '_blank');
   };
+  box.querySelector('[data-clr]').onclick = () => {
+    if (!confirm('清空已擷取的 ' + items.size + ' 件商品？（已送到選品網站的不受影響）')) return;
+    items.clear(); try { localStorage.removeItem(KEY); } catch (e) { /* 略過 */ } upd();
+  };
+  box.querySelector('[data-stop]').onclick = () => {
+    window.fetch = of; XMLHttpRequest.prototype.send = os; clearInterval(iv); persist();
+    box.remove(); delete window.__spg;
+  };
   document.body.appendChild(box);
   window.__spg = box;
+  upd();
 }
 const bmCode = () => 'javascript:' + encodeURIComponent(`(${shopeeGrab.toString()})(${JSON.stringify(location.origin)});void 0`);
 function checkImport() {
