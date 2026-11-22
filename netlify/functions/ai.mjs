@@ -1,7 +1,7 @@
 // /api/ai — 唯一的後端端點：任務白名單、伺服器端組裝提示詞、呼叫 Gemini。
 // 金鑰只來自環境變數 GEMINI_API_KEY，或使用者以 x-gemini-key 標頭自備（不記錄、不寫日誌）。
 
-const TASKS = new Set(['analyze']);
+const TASKS = new Set(['analyze', 'schedule']);
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
 const MAX_IMAGE = 2_200_000;            // 壓縮後截圖 base64 上限（約 1.6 MB 原始）
 const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
@@ -50,6 +50,14 @@ ${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(
 只輸出 JSON，結構如下：
 {"verdict":"一句話判斷","festivalPost":{"festival":"節慶名稱","post":"節慶活動貼文"},"posts":["3 則可直接發布的短貼文：每則 40–80 字、口語自然、第一句就抓住注意力（痛點、反差或驚喜）、帶 1–2 個 emoji、結尾有行動呼籲（例如「連結在留言／個人頁」）並加上「#含分潤連結」與 2–3 個相關 hashtag；三則風格不同（痛點型、開箱驚喜型、限時優惠型）"],"longPost":"一則 150–300 字的使用心得長文，適合 Facebook 社團或 Dcard：真實情境開頭、3 個重點、優缺點都提、結尾 CTA 與揭露","headlines":["3–5 個吸睛的第一句／標題"],"carousel":[{"slide":"第 1 張","title":"圖上大字","text":"說明"}],"imageIdeas":["3–4 個實拍照片建議（拍什麼、怎麼構圖）"],"strengths":["優勢"],"risks":["風險"],"cta":"行動呼籲（含連結放哪裡）","hashtags":["#標籤"],"bestTime":"建議發文時段與理由","replies":["2–3 個預想留言提問與建議回覆"],"tests":["A/B 測試建議"],"compliance":["合規提醒"]}
 carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${plat(p.platform)}，貼文形式：${s(p.format, 20) || '圖文貼文'}。${festText}` };
+    }
+    case 'schedule': {
+      // 內容日曆：替已排好日期的貼文挑選發文時間（日期由系統決定，AI 只排時間）
+      const list = (Array.isArray(p.items) ? p.items : []).slice(0, 30).map((x) => ({ id: s(x.id, 40), 商品: s(x.name, 80), 分類: s(x.category, 40), 價格: n(x.price), 日期: s(x.date, 10), 星期: s(x.weekday, 2), 文案建議時段: s(x.bestTime, 200) }));
+      return { json: true, low: true, text: `以下是台灣社群媒體（${SOCIAL}）蝦皮分潤貼文已排定的發文日期，請替每一則挑選最適合的發文時間（台灣時間）。
+若該則有「文案建議時段」（先前 AI 文案給的建議），請以它為準，依當天是平日或週末換算成具體時間；沒有時，再依商品分類的目標族群（例如上班族、學生、家長、寵物飼主）與星期幾判斷他們最常滑手機的時段；同一天有多則時請錯開至少 1 小時，避免同時發出。
+${JSON.stringify(list)}
+只輸出 JSON：{"plans":[{"id":"原樣帶回的 id","time":"HH:MM（24 小時制）","why":"15 字內的理由"}]}` };
     }
   }
 }
