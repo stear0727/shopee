@@ -52,12 +52,19 @@ ${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(
 carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${plat(p.platform)}，貼文形式：${s(p.format, 20) || '圖文貼文'}。${festText}` };
     }
     case 'schedule': {
-      // 內容日曆：替已排好日期的貼文挑選發文時間（日期由系統決定，AI 只排時間）
-      const list = (Array.isArray(p.items) ? p.items : []).slice(0, 30).map((x) => ({ id: s(x.id, 40), 商品: s(x.name, 80), 分類: s(x.category, 40), 價格: n(x.price), 日期: s(x.date, 10), 星期: s(x.weekday, 2), 文案建議時段: s(x.bestTime, 200) }));
-      return { json: true, low: true, text: `以下是台灣社群媒體（${SOCIAL}）蝦皮分潤貼文已排定的發文日期，請替每一則挑選最適合的發文時間（台灣時間）。
-若該則有「文案建議時段」（先前 AI 文案給的建議），請以它為準，依當天是平日或週末換算成具體時間；沒有時，再依商品分類的目標族群（例如上班族、學生、家長、寵物飼主）與星期幾判斷他們最常滑手機的時段；同一天有多則時請錯開至少 1 小時，避免同時發出。
-${JSON.stringify(list)}
-只輸出 JSON：{"plans":[{"id":"原樣帶回的 id","time":"HH:MM（24 小時制）","why":"15 字內的理由"}]}` };
+      // 內容日曆：替系統選出的商品，從使用者可發文的日期中挑日期與時間
+      const list = (Array.isArray(p.items) ? p.items : []).slice(0, 40).map((x) => ({ id: s(x.id, 40), 商品: s(x.name, 80), 分類: s(x.category, 40), 價格: n(x.price), 檔期: s(x.event, 40) || undefined, 檔期最早日期: s(x.evFrom, 10) || undefined, 文案建議時段: s(x.bestTime, 200) || undefined }));
+      const dates = (Array.isArray(p.dates) ? p.dates : []).slice(0, 14).map((d) => ({ 日期: s(d.date, 10), 星期: s(d.weekday, 2), 已排: n(d.used) || 0 }));
+      const perDay = Math.min(10, Math.max(1, n(p.perDay) || 3));
+      return { json: true, low: true, text: `你是台灣社群媒體（${SOCIAL}）蝦皮分潤貼文的排程助理。請替下列每件商品，從「可發文日期」中挑一天，並挑最適合的發文時間（台灣時間）。
+規則：
+1. 日期只能從可發文日期中選；每天最多 ${perDay} 則（含「已排」的則數）。
+2. 有「文案建議時段」的商品（先前 AI 文案給的建議），時間以它為準，並依那天是平日或週末換算成具體時間；沒有時，依商品分類的目標族群（例如上班族、學生、家長、寵物飼主）判斷他們最常滑手機的日子與時段。
+3. 有檔期的商品，日期不要早於「檔期最早日期」，並盡量靠近檔期。
+4. 同一天有多則時，時間錯開至少 1 小時；同類商品盡量分散到不同天。
+可發文日期：${JSON.stringify(dates)}
+商品：${JSON.stringify(list)}
+只輸出 JSON：{"plans":[{"id":"原樣帶回的 id","date":"YYYY-MM-DD","time":"HH:MM（24 小時制）","why":"15 字內的理由"}]}` };
     }
   }
 }

@@ -152,6 +152,38 @@ function calReconcile() {
   }
   return ch;
 }
+// AI 排程：系統選好這週要推的商品後，由 AI 從你選的發文日挑日期與時間（一週一次呼叫）。
+// 只排「建議」卡片，且不動你手動改過日期或時間的；AI 無法使用時保留系統排的日期。
+const calAIBusy = new Set();
+async function calAIPlan(ws, btn = null, auto = false) {
+  if (calAIBusy.has(ws)) return;
+  const c = CS(), we = addD(ws, 6), slots = weekSlots(ws, c);
+  const list = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= ws && p.d <= we && p.d >= today() && !p.md && p.tw !== '手動');
+  if (!slots.length || !list.length) { if (!auto) toast('這一週沒有需要 AI 排程的建議（手動改過的會保留）'); return; }
+  const ids = new Set(list.map(({ p }) => p.id)), used = {};
+  allPlans().forEach(({ p }) => { if (p.d >= ws && p.d <= we && !ids.has(p.id)) used[p.d] = (used[p.d] || 0) + 1; });
+  calAIBusy.add(ws);
+  try {
+    const items_ = list.slice(0, 40).map(({ p, i }) => { const e = slots.map((d) => evOf(i, d, c)).find(Boolean); return { id: p.id, name: i.name, category: i.category, price: num(i.price), event: e ? e.name : '', evFrom: e ? addD(e.start, -c.pre) : '', bestTime: typeof bestTimeOf === 'function' ? bestTimeOf(i).slice(0, 200) : '' }; });
+    const j = await ai('schedule', { items: items_, perDay: c.perDay, dates: slots.map((d) => ({ date: d, weekday: WD[pd(d).getDay()], used: used[d] || 0 })) }, btn);
+    let n = 0; const cnt = { ...used };
+    for (const r of (j.json && Array.isArray(j.json.plans) ? j.json.plans : [])) {
+      const f0 = list.find(({ p }) => p.id === r.id), m = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
+      if (!f0) continue;
+      // 日期必須是你選的發文日，且那天還沒排滿；不符合就排到最少的那天
+      let d = slots.includes(String(r.date)) && (cnt[r.date] || 0) < c.perDay ? String(r.date) : slots.reduce((a, b) => ((cnt[b] || 0) < (cnt[a] || 0) ? b : a));
+      cnt[d] = (cnt[d] || 0) + 1;
+      Object.assign(f0.p, { d, ai: 1, tw: `AI：${String(r.why || '').slice(0, 30)}` });
+      if (m && Number(m[1]) < 24 && Number(m[2]) < 60) f0.p.t = `${pad2(Number(m[1]))}:${m[2]}`;
+      n++;
+    }
+    save.i(); if (location.hash === '#cal' && !$('#dlg').open) renderCal();
+    toast(n ? `AI 已排好 ${n} 則的日期與時間` : 'AI 沒有回傳可用的排程，先用系統排的日期');
+  } catch (e) {
+    if (!auto) toast(e.message || 'AI 排程失敗'); else toast('AI 排程暫時無法使用，先用系統排的日期（可稍後按「AI 重新排程」）');
+  } finally { calAIBusy.delete(ws); }
+}
+
 /* ---------- 畫面 ---------- */
 function initSel() {
   calWeek = curWeek();
@@ -167,6 +199,7 @@ function renderCal() {
   // 第一次打開某一週（且雲端同步已完成）時自動產生建議
   if (calReady && weekSlots(ws, c).length && (S.calGen || {})[ws] !== GEN_V && items.length) {
     planWeek(ws);
+    setTimeout(() => calAIPlan(ws, null, true), 0);   // 選好商品後交給 AI 排日期與時間
     const keep = addD(today(), -120);
     S.calGen = Object.fromEntries(Object.entries({ ...(S.calGen || {}), [ws]: GEN_V }).filter(([k]) => k >= keep));
     save.s(); save.i();
@@ -254,7 +287,7 @@ function agendaHtml(d) {
   return `<section class="agenda" aria-label="當天排程">
     <div class="ag-head"><h2>${dd.getMonth() + 1} 月 ${dd.getDate()} 日（${WD[dd.getDay()]}）${d === today() ? ' <span class="tag">今天</span>' : ''}</h2><button type="button" data-act="calAdd" data-d="${d}">＋ 新增</button></div>
     ${list.length ? list.map(agItem).join('') : `<p class="empty">這天沒有排程${CS().days.includes(dd.getDay()) ? '' : '（不是預設發文日）'}。</p>`}
-    <p class="hint">日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開。確定排定後可在這裡產生文案、發文後按「標記已發布」。時間依 AI 文案的建議時段自動帶入，電腦版可把下方項目拖到月曆上的其他日期。</p>
+    <p class="hint">日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開。確定排定後可在這裡產生文案、發文後按「標記已發布」。建議的日期與時間由 AI 排定（有 AI 文案的依文案建議時段），手動改過的不會再被 AI 移動；電腦版可把下方項目拖到月曆上的其他日期。</p>
   </section>`;
 }
 function agItem({ p, i }) {
@@ -321,13 +354,14 @@ function calTime(pid) {
   const { p, i } = f0, d = $('#dlg'), bt = typeof bestTimeOf === 'function' ? bestTimeOf(i) : '';
   d.innerHTML = `<form method="dialog" id="fTime"><h2>${esc(i.name)}</h2>
     <div class="row2"><label>發文日期<input name="d" type="date" required value="${esc(p.d)}"></label><label>發文時間<input name="t" type="time" value="${esc(p.t || '')}"></label></div>
-    ${bt ? `<p class="hint">AI 文案建議時段：${esc(bt)}</p>` : '<p class="hint">這件商品還沒有 AI 文案；產生文案後會依建議時段自動帶入時間，也可以在日曆按「AI 排時間」。</p>'}
+    ${bt ? `<p class="hint">AI 文案建議時段：${esc(bt)}</p>` : '<p class="hint">這件商品還沒有 AI 文案；可以在日曆按「AI 重新排程」，或產生文案後依建議時段帶入時間。</p>'}
     <div class="btns"><button value="cancel" formnovalidate class="ghost">取消</button><button value="ok" class="pri">儲存</button></div></form>`;
   d.returnValue = '';
   d.onclose = () => {
     d.onclose = null; if (d.returnValue !== 'ok') return;
     const f = new FormData($('#fTime')), nd = String(f.get('d') || p.d), nt = String(f.get('t') || '');
     if (nt !== (p.t || '')) p.tw = nt ? '手動' : '';
+    if (nd !== p.d) p.md = 1;
     Object.assign(p, { d: nd, t: nt, m: 1 }); save.i(); softRefresh(); toast('已更新時間');
   };
   if (!d.open) d.showModal();
@@ -396,6 +430,7 @@ Object.assign(ACT, {
     if (!weekSlots(calWeek, c).length) { toast(`${wn}的發文日都已經過了，請在月曆點下週的日期再產生`); return; }
     if (!confirm(`重新產生${wn}的建議？還沒「確定排定」的建議會重新排，已排定與已發布的會保留。`)) return;
     const r = planWeek(calWeek); S.calGen = { ...(S.calGen || {}), [calWeek]: GEN_V }; save.s(); save.i(); renderCal();
+    calAIPlan(calWeek, null, true);
     const we = addD(calWeek, 6), wk = allPlans().filter(({ p }) => p.d >= calWeek && p.d <= we);
     toast(`${wn}：建議 ${wk.filter(({ p }) => p.st === 'sug').length} 則、已排定 ${wk.filter(({ p }) => p.st === 'set').length} 則${r.short ? `，還少 ${r.short} 則（原因見上方提醒）` : ''}`);
   },
@@ -405,19 +440,7 @@ Object.assign(ACT, {
   calDone(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; Object.assign(f0.p, { st: 'done', at: new Date().toISOString(), m: 1 }); save.i(); renderCal(); toast(`已標記發布（${fmtDT(f0.p.at)}）`); },
   calUndone(b) { const f0 = findPlan(b.dataset.pid); if (!f0) return; Object.assign(f0.p, { st: 'set', at: '', m: 1 }); save.i(); renderCal(); toast('已取消已發布'); },
   calTime(b) { calTime(b.dataset.pid); },
-  async calAITime(b) {
-    const ws = calWeek, we = addD(ws, 6), list = allPlans().filter(({ p }) => isOpen(p) && p.d >= ws && p.d <= we && p.d >= today() && p.tw !== '手動');   // 手動設定的時間不覆蓋
-    if (!list.length) { toast('這一週沒有需要 AI 排時間的卡片（手動設定的時間會保留）'); return; }
-    try {
-      const j = await ai('schedule', { items: list.slice(0, 30).map(({ p, i }) => ({ id: p.id, name: i.name, category: i.category, price: num(i.price), date: p.d, weekday: WD[pd(p.d).getDay()], bestTime: typeof bestTimeOf === 'function' ? bestTimeOf(i).slice(0, 200) : '' })) }, b);
-      let n = 0;
-      for (const r of (j.json && Array.isArray(j.json.plans) ? j.json.plans : [])) {
-        const f0 = list.find(({ p }) => p.id === r.id), m = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
-        if (f0 && m && Number(m[1]) < 24 && Number(m[2]) < 60) { Object.assign(f0.p, { t: `${pad2(Number(m[1]))}:${m[2]}`, tw: `AI：${String(r.why || '').slice(0, 30)}`, m: 1 }); n++; }
-      }
-      save.i(); renderCal(); toast(n ? `AI 已排好 ${n} 則的發文時間` : 'AI 沒有回傳可用的時間，請稍後再試');
-    } catch (e) { toast(e.message || 'AI 排時間失敗'); }
-  },
+  calAITime(b) { calAIPlan(calWeek, b, false); },
   calAdd(b) { calAdd(b.dataset.d); },
   calJump(b) { calJump(b.dataset.pid); },
   calF(b) { calFilter = b.dataset.f; renderCal(); },
@@ -456,7 +479,7 @@ document.addEventListener('dragleave', (e) => { const d = e.target.closest?.('[d
 document.addEventListener('drop', (e) => {
   const d = e.target.closest?.('[data-day]'); if (!d) return; e.preventDefault(); d.classList.remove('drop');
   const f0 = findPlan(e.dataTransfer.getData('text/plain')); if (!f0 || !isOpen(f0.p) || f0.p.d === d.dataset.day) return;
-  f0.p.d = d.dataset.day; f0.p.m = 1; save.i(); renderCal(); toast(`已改到 ${fmtMD(d.dataset.day)}`);
+  f0.p.d = d.dataset.day; f0.p.m = 1; f0.p.md = 1; save.i(); renderCal(); toast(`已改到 ${fmtMD(d.dataset.day)}`);
 });
 
 VIEWS.push('cal'); RENDER.cal = renderCal;
