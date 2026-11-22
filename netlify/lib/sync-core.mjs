@@ -14,6 +14,13 @@ export function makeHandler(getStoreFn, env = process.env) {
     const store = getStoreFn({ name: 'shoopee-sync', consistency: 'strong' });
 
     if (req.method === 'GET') {
+      // ?check=1：只回傳版本時間（讀中繼資料，不下載整份資料），供前端每幾秒輕量檢查
+      if (new URL(req.url).searchParams.has('check')) {
+        const meta = store.getMetadata ? await store.getMetadata(DATA_KEY) : null;
+        if (meta?.metadata?.at) return json(200, { ok: true, at: Number(meta.metadata.at) });
+        const old = await store.get(DATA_KEY, { type: 'json' });   // 舊資料沒有中繼資料時退回讀全文
+        return json(200, { ok: true, at: old?.at ?? 0 });
+      }
       const cur = await store.get(DATA_KEY, { type: 'json' });
       return json(200, { ok: true, data: cur?.data ?? null, at: cur?.at ?? 0 });
     }
@@ -27,7 +34,7 @@ export function makeHandler(getStoreFn, env = process.env) {
       const cur = await store.get(DATA_KEY, { type: 'json' });
       if (cur && Number.isFinite(body.base) && cur.at > body.base) return json(409, { ok: false, error: 'conflict', data: cur.data, at: cur.at });
       const at = Date.now();
-      await store.setJSON(DATA_KEY, { data: body.data, at });
+      await store.setJSON(DATA_KEY, { data: body.data, at }, { metadata: { at } });
       return json(200, { ok: true, at });
     }
     return json(405, { ok: false, error: 'Method not allowed' });
