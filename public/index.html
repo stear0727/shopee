@@ -44,6 +44,7 @@
     <button type="button" data-act="pickAll">全選</button>
     <button type="button" class="ghost" data-act="pickNone">取消選取</button>
     <span class="grow"></span>
+    <button type="button" data-act="scoreHelp">評分說明</button>
     <button type="button" data-act="autoCatAll">自動分類</button>
     <button type="button" data-act="expItems">匯出 CSV</button>
   </div>
@@ -56,6 +57,12 @@
   <h1 tabindex="-1">發布清單</h1>
   <p class="hint">在「商品」頁勾選要發布的商品加入這裡。按「產生文案」會跳出 AI 文案；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
   <h2>待發布 <span class="tag" id="pubQueueN">0</span></h2>
+  <div class="toolbar">
+    <button type="button" data-act="pubAll">全選</button>
+    <button type="button" class="ghost" data-act="pubNone">取消選取</button>
+    <button type="button" class="pri" id="pubDoneBtn" data-act="pubDoneSel" disabled>標記已發布（0）</button>
+    <button type="button" id="pubOutBtn" data-act="pubOutSel" disabled>移出清單（0）</button>
+  </div>
   <div id="pubQueue" class="cards"></div>
   <h2 class="mt">已發布 <span class="tag" id="pubDoneN">0</span></h2>
   <div id="pubDone" class="cards"></div>

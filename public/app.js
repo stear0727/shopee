@@ -47,7 +47,6 @@ const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFin
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
 const DIMS = [
-  { k: 'visual', n: '圖片吸睛度', s: '吸睛', w: 18, q: '一張實拍照片就能看出賣點或效果嗎？' },
   { k: 'pain', n: '痛點與需求強度', s: '痛點', w: 14, q: '觀眾是否已經在找解決方法？' },
   { k: 'trust', n: '銷量與評價信任度', s: '信任', w: 14, q: '評分、評價數、近期銷量是否足以建立信任？' },
   { k: 'topic', n: '話題性與季節性', s: '話題', w: 10, q: '現在是不是好時機（檔期、天氣、話題）？' },
@@ -302,7 +301,10 @@ function renderAnalyze(j, p) {
     const car = Array.isArray(o.carousel) ? o.carousel : [];
     const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).join(' ');
     const replies = Array.isArray(o.replies) ? o.replies : [];
+    const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' && o.festivalPost.post.trim() ? o.festivalPost : null;
+    if (fp) outText.postFest = fp.post;
     h = `<p class="verdict">${esc(o.verdict)}</p>
+    ${fp ? `<h3>🎉 節慶活動文案（${esc(fp.festival || '近期節慶')}）</h3><div class="post fest"><p>${esc(fp.post)}</p><button type="button" data-act="copy" data-k="postFest">複製</button></div>` : ''}
     ${posts.length ? `<h3>短貼文（Threads／IG／FB，可直接複製）</h3>${posts.map((x, n) => `<div class="post"><p>${esc(x)}</p><button type="button" data-act="copy" data-k="post${n}">複製</button></div>`).join('')}` : ''}
     ${long ? `<h3>心得長文（FB 社團／Dcard）</h3><div class="post"><p>${esc(long)}</p><button type="button" data-act="copy" data-k="postLong">複製</button></div>` : ''}
     <h3>吸睛第一句</h3>${L(o.headlines || o.hooks)}
@@ -315,7 +317,7 @@ function renderAnalyze(j, p) {
     ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
     const ls = (a) => (Array.isArray(a) ? a.map((x) => `- ${str(x)}`).join('\n') : '');
-    t = `【${p.name}】${o.verdict || ''}\n\n${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${o.cta || ''}\nHashtag：${tags}\n${o.bestTime ? `發文時段：${str(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    t = `【${p.name}】${o.verdict || ''}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${o.cta || ''}\nHashtag：${tags}\n${o.bestTime ? `發文時段：${str(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>`; t = j.text + `\n\nSub_id：${sub}`; }
   if (safeUrl(p.aff)) { outText.aff = p.aff; h += `<h3>推廣連結</h3><div class="post"><p>${esc(p.aff)}</p><button type="button" data-act="copy" data-k="aff">複製</button></div>`; t += `\n推廣連結：${p.aff}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
@@ -338,7 +340,7 @@ const SORT_FN = {
   new: (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
 };
 /* ========== 發布清單 ========== */
-const picked = new Set();
+const picked = new Set(), pubPicked = new Set();
 const INQ = (i) => i.status === 'todo' || i.status === 'copy';   // 待發文、已產文案＝在發布清單中
 const pad2 = (n) => String(n).padStart(2, '0');
 const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -353,17 +355,20 @@ function setStatus(i, s) {
 }
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
+function updPubBtns() { for (const [id, l] of [['pubDoneBtn', '標記已發布'], ['pubOutBtn', '移出清單']]) { const b = $('#' + id); if (b) { b.textContent = `${l}（${pubPicked.size}）`; b.disabled = !pubPicked.size; } } }
 function renderPub() {
+  for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INQ(i)) pubPicked.delete(id); }
   const q = items.filter(INQ).sort((a, b) => String(a.queuedAt || a.createdAt).localeCompare(String(b.queuedAt || b.createdAt)));
   const d = items.filter((i) => i.status === 'done').sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
   $('#pubQueueN').textContent = q.length; $('#pubDoneN').textContent = d.length;
   $('#pubQueue').innerHTML = q.length ? q.map(pubRow).join('') : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
+  updPubBtns();
   $('#pubDone').innerHTML = d.length ? d.map(pubRow).join('') : '<p class="empty">還沒有已發布的商品。</p>';
 }
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
   return `<article class="pc pub${done ? ' isdone' : ''}">
-    <div class="pc-top"><span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span><span class="muted sm">${esc(i.shop || '')}</span></div>
+    <div class="pc-top"><span>${done ? '' : `<label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>`}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     <div class="acts">
@@ -500,6 +505,30 @@ const ACT = {
   },
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
+  pubAll() { items.filter(INQ).forEach((i) => pubPicked.add(i.id)); renderPub(); },
+  pubNone() { pubPicked.clear(); renderPub(); },
+  pubDoneSel() {
+    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
+    list.forEach((i) => setStatus(i, 'done')); pubPicked.clear(); save.i(); renderPub(); toast(`已標記 ${list.length} 件為已發布（${fmtDT(new Date().toISOString())}）`);
+  },
+  pubOutSel() {
+    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
+    if (!confirm(`將 ${list.length} 件移出發布清單？`)) return;
+    list.forEach((i) => setStatus(i, 'watch')); pubPicked.clear(); save.i(); renderPub();
+  },
+  scoreHelp() {
+    const sw = DIMS.reduce((t, d) => t + num(S.weights[d.k]), 0) || 1;
+    const src = { price: '自動：價格 ≤299→5、≤599→4、≤999→3、≤1,999→2、其他→1', trust: '自動：匯入時依銷量，≥1 萬→5、≥1,000→4、其他→3' };
+    const d = $('#dlg');
+    d.innerHTML = `<div class="dlg-head"><h2>評分說明</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+      <h3>系統分數（0–100）</h3><p>各項目以 1–5 分計，依權重加權換算成 0–100 分：<code>Σ 權重 ×（得分 − 1）÷ 4</code>，再除以權重合計。權重可到「設定」調整。</p>
+      <div class="tw"><table><thead><tr><th>項目</th><th>權重</th><th>來源</th></tr></thead><tbody>${DIMS.map((x) => `<tr><td>${esc(x.n)}</td><td>${fmt(num(S.weights[x.k]) / sw * 100, 0)}%</td><td>${esc(src[x.k] || '預設 3 分（中間值）')}</td></tr>`).join('')}</tbody></table></div>
+      <p class="hint">目前沒有手動評分頁，標示「預設 3 分」的項目對所有商品相同，因此分數高低主要由價格帶與銷量決定。</p>
+      <h3>分級</h3><ul><li><b>S</b>：80 分以上，優先發文</li><li><b>A</b>：65–79 分，穩定推薦</li><li><b>B</b>：50–64 分，小量測試</li><li><b>C</b>：未滿 50 分，不建議</li></ul>
+      <h3>推薦指數（0–100，用於排行）</h3><p>系統分數 60%＋銷量 40%。銷量以對數換算，並與目前清單中銷量最高的商品相比，所以匯入新商品後指數會跟著變動。</p>
+      <h3>分類</h3><p>依商品名稱關鍵字自動判斷（例如「面膜」→美妝保養、「行動電源」→3C 配件），分錯可在卡片按「編輯」修改。</p>`;
+    d.showModal();
+  },
   publish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'done'); save.i(); route(); toast(`已標記發布：${fmtDT(i.publishedAt)}`); },
   unpublish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, i.aiText ? 'copy' : 'todo'); save.i(); route(); },
   unqueue(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'watch'); save.i(); route(); },
@@ -524,6 +553,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
+  else if (t.matches('[data-ppick]')) { if (t.checked) pubPicked.add(t.dataset.ppick); else pubPicked.delete(t.dataset.ppick); updPubBtns(); }
   else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
   else if (t.matches('[data-imp]') && t.files.length) {
     // 可一次選多個檔案，逐一匯入後彙總結果
@@ -553,5 +583,6 @@ document.addEventListener('input', (e) => {
 $$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'fb'); });
 $$('select[data-opt="format"]').forEach((s) => { s.innerHTML = FORMATS.map((f) => `<option>${esc(f)}</option>`).join(''); });
 $('#listSort').innerHTML = opts(SORTS, 'rec');
+items.forEach(rescore); save.i();
 window.addEventListener('hashchange', route);
 route();

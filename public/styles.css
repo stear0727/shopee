@@ -199,6 +199,7 @@ a.btn{text-decoration:none}
 .pc.isdone{opacity:.85}
 .mt{margin-top:24px}
 #pubQueue .empty,#pubDone .empty{grid-column:1/-1}
+.post.fest{background:color-mix(in srgb,var(--ok) 14%,var(--card));border:1px solid color-mix(in srgb,var(--ok) 40%,var(--card))}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
