@@ -5,7 +5,7 @@
  * 在日曆上確定排定、產生文案、標記已發布。
  * plan = { id, d: 排定日期, t: 發文時間 HH:MM, tw: 時間來源, st: sug|set|done, p: 排程優先分, g: 入選等級, r: 入選原因, fill: 補位, m: 手動改過, man: 手動新增, at: 發布時間 }
  */
-const CAL_DEF = { minG: 'A', fill: 'auto', perDay: 3, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
+const CAL_DEF = { minG: 'A', fill: 'auto', perDay: 3, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
 // 由使用者選發文日與每天篇數；每週則數＝發文日數 × 每天篇數（舊設定的每週則數換算成每天篇數）
 const CS = () => {
   const o = { ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } };
@@ -30,7 +30,6 @@ const overdue = (p) => p.st === 'set' && p.d < today();   // 已排定但日期�
 const plansOf = (i) => (Array.isArray(i.plans) ? i.plans : (i.plans = []));
 const allPlans = () => items.flatMap((i) => (Array.isArray(i.plans) ? i.plans.map((p) => ({ p, i })) : []));
 const findPlan = (pid) => allPlans().find(({ p }) => p.id === pid);
-const dataAge = (i) => { const t = new Date(i.updAt || i.createdAt); return Number.isNaN(+t) ? 999 : Math.floor((Date.now() - t) / 864e5); };
 const risks = (i) => [...(Array.isArray(i.risk) ? i.risk : []), ...(i.oos ? ['缺貨'] : [])];
 const byGrade = (a, b) => (GR[a.p.g] ?? 9) - (GR[b.p.g] ?? 9) || num(b.p.p) - num(a.p.p);   // 卡片依等級（S→A→B）再依優先分排序
 
@@ -68,7 +67,7 @@ const inWeekOf = (i, ws) => { const we = addD(ws, 6); return (Array.isArray(i.pl
 function scoreCands(ws, slots, grades, c, H, except = new Set(), cool = false) {
   const W = c.w, wsum = (W.s + W.h + W.c) || 1;
   const busy = (i) => (cool ? inWeekOf(i, ws) : isBusy(i, ws, c)) || skipped(i, ws);
-  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
+  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && grades.includes(i.grade) && !risks(i).length && !busy(i))
     .map((i) => {
       let ev = null, evD = '';
       for (const d of slots) { const e = evOf(i, d, c); if (e) { ev = e; evD = d; break; } }   // 檔期商品排在最早可預熱的發文日
@@ -205,22 +204,21 @@ const jumpBtn = ({ p, i }) => `<button type="button" class="link" data-act="calJ
 function shortWhy(ws, c) {
   const we = addD(ws, 6), gs = GL.slice(0, (c.fill === 'auto' ? GR.B : GR[c.minG]) + 1);
   const inWeek = new Set(allPlans().filter(({ p }) => p.d >= ws && p.d <= we).map(({ i }) => i.id));
-  const n = { low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
+  const n = { low: 0, cool: 0, rk: 0, skip: 0, list: 0 };
   for (const i of items) {
     if (i.status === 'drop' || inWeek.has(i.id)) continue;
-    if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; 
+    if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (risks(i).length) n.rk++; 
   }
-  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`]].filter(([k]) => k).map(([, v]) => v);
+  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`]].filter(([k]) => k).map(([, v]) => v);
   return t.length ? t.join('、') : '符合條件的商品都已經排進這週了';
 }
 function alertsHtml(ws, we, c) {
   const all = allPlans(), wk = all.filter(({ p }) => p.d >= ws && p.d <= we);
   const pend = wk.filter(({ p }) => p.st === 'set'), sugs = wk.filter(({ p }) => p.st === 'sug' && p.d >= today()), od = all.filter(({ p }) => overdue(p));
-  const stale = all.filter(({ p, i }) => isOpen(p) && dataAge(i) > c.fresh), rk = all.filter(({ p, i }) => isOpen(p) && risks(i).length);
+  const rk = all.filter(({ p, i }) => isOpen(p) && risks(i).length);
   const cnt = wk.length, li = [], wn = weekName(ws);
   const list = (a) => a.slice(0, 6).map(jumpBtn).join('、') + (a.length > 6 ? ` 等 ${a.length} 則` : '');
   if (od.length) li.push(`<li class="bad">逾期 <b>${od.length}</b> 則（日期已過但還沒標記已發布）：${list(od)}</li>`);
-  if (stale.length) li.push(`<li class="warn">資料過期 <b>${stale.length}</b> 則（請重新匯入蝦皮檔）：${list(stale)}</li>`);
   if (rk.length) li.push(`<li class="warn">風險標記 <b>${rk.length}</b> 則：${list(rk)}</li>`);
   if (!items.length) li.push('<li class="warn">還沒有商品，請先到「商品分析」匯入蝦皮商品檔。</li>');
   else if (!weekSlots(ws, c).length && we >= wkStart(today())) li.push(`<li class="muted">${wn}的發文日都已經過了，請點下週的日期查看建議。</li>`);
@@ -244,7 +242,7 @@ function calCard({ p, i }, pick = false) {
     <h4>${esc(i.name)}</h4>
     <p class="cc-d">${pick ? `📅 ${esc(fmtMD(p.d))} ` : ''}${p.st === 'done' ? `✓ 發布於 ${esc(fmtDT(p.at))}` : p.t ? `⏰ ${esc(p.t)} <span class="cc-tw">${esc(p.tw || '')}</span>` : '<span class="muted">⏰ 未排時間</span>'}</p>
     <p class="cc-r">${esc(p.r || '')}</p>
-    ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}${open && dataAge(i) > c.fresh ? `<p class="cc-warn">⚠ 商品資料 ${dataAge(i)} 天未更新</p>` : ''}
+    ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}
     <div class="cc-acts">${planBtns(p, i, pid)}${open ? `<button type="button" class="ghost" data-act="calTime" data-pid="${pid}">管理時間</button>` : ''}${delBtn(pid)}</div>
   </article>`;
 }
@@ -285,7 +283,7 @@ function agItem({ p, i }) {
       <div class="ag-n">${esc(i.name)}</div>
       <div class="ag-m"><span class="pill st-${esc(p.st)}${od ? ' od' : ''}">${od ? '逾期' : PST[p.st]}</span><span class="grade g${esc(p.g)}">${esc(p.g)}</span>${p.fill ? '<span class="tag">補位</span>' : ''}${p.cd ? '<span class="tag">近期排過</span>' : ''}<span class="muted">${esc(p.st === 'done' ? '已發布' : p.tw || '未排時間')}</span></div>
       <p class="cc-r">${esc(p.r || '')}</p>
-      ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}${open && dataAge(i) > c.fresh ? `<p class="cc-warn">⚠ 商品資料 ${dataAge(i)} 天未更新</p>` : ''}
+      ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}
       <div class="cc-acts">${planBtns(p, i, pid)}${open ? `<button type="button" class="ghost" data-act="calTime" data-pid="${pid}">管理時間</button>` : ''}${delBtn(pid)}</div>
     </div>
   </article>`;
@@ -322,7 +320,6 @@ function setHtml(c) {
     <div class="card"><h2>排程設定</h2><div class="row2">
     <label>最低入選等級<select data-cs="minG">${['S', 'A', 'B'].map((g) => `<option value="${g}"${c.minG === g ? ' selected' : ''}>${g} 級以上</option>`).join('')}</select></label>
     <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動依序補入下一等級（S→A→B）</option></select></label>
-    ${n('fresh', '商品資料新鮮度上限', 7, 30, ' 天')}
     ${n('cool', '冷卻期（優先避開近期排過的商品）', 7, 60, ' 天')}${n('catCap', '同一類別週上限 %', 20, 100, '%')}
     ${n('pre', '檔期提前預熱天數', 3, 14, ' 天')}</div>
     <fieldset><legend>排程優先分權重（商品總分／熱度／檔期，會自動換算成合計 1）</legend><div class="row3">
@@ -445,7 +442,7 @@ Object.assign(ACT, {
     const ws = w.s + w.h + w.c; if (!ws) { toast('三項權重不能都是 0'); return; }
     const days = $$('[data-csday]').filter((e) => e.checked).map((e) => Number(e.dataset.csday));
     if (!days.length) { toast('至少選一個發文日'); return; }
-    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(v('perDay')) || 3, 1, 10), fresh: clamp(Math.round(v('fresh')), 7, 30), cool: clamp(Math.round(v('cool')), 7, 60), catCap: clamp(Math.round(v('catCap')), 20, 100), pre: clamp(Math.round(v('pre')), 3, 14), days, w: { s: Math.round(w.s / ws * 100) / 100, h: Math.round(w.h / ws * 100) / 100, c: Math.round(w.c / ws * 100) / 100 } };
+    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(v('perDay')) || 3, 1, 10), cool: clamp(Math.round(v('cool')), 7, 60), catCap: clamp(Math.round(v('catCap')), 20, 100), pre: clamp(Math.round(v('pre')), 3, 14), days, w: { s: Math.round(w.s / ws * 100) / 100, h: Math.round(w.h / ws * 100) / 100, c: Math.round(w.c / ws * 100) / 100 } };
     S.calGen = {};   // 設定改了：之後打開各週時重新排（只換掉還沒確定的建議）
     save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），還沒確定排定的建議會依新設定重新排。`;
   },
