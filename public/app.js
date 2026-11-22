@@ -396,12 +396,12 @@ function renderPub() {
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
   return `<article class="pc pub${done ? ' isdone' : ''}">
-    <div class="pc-top"><span>${done ? '' : `<label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>`}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
+    <div class="pc-top"><span>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : `<label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>`}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}${i.aiFest ? `｜節慶：${esc(i.aiFest.length > 30 ? i.aiFest.slice(0, 30) + '…' : i.aiFest)}` : ''}</div>` : ''}
     <div class="acts">
-      ${done ? `<button type="button" data-act="unpublish" data-id="${id}">改回待發布</button>` : `<button type="button" class="pri" data-act="publish" data-id="${id}">標記已發布</button>`}
+      ${done ? `<button type="button" class="btn-done" data-act="unpublish" data-id="${id}" aria-pressed="true" title="再按一下改回待發布">✓ 已發布</button>` : `<button type="button" data-act="publish" data-id="${id}" aria-pressed="false">標記已發布</button>`}
       ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
       ${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">${i.aiText ? '重新產文案' : '產生文案'}</button>
       ${done ? '' : `<button type="button" class="ghost" data-act="unqueue" data-id="${id}">移出清單</button>`}

@@ -203,6 +203,9 @@ a.btn{text-decoration:none}
 .fest-box{background:color-mix(in srgb,var(--ok) 10%,var(--card));border:1px solid color-mix(in srgb,var(--ok) 35%,var(--card));border-radius:12px;padding:10px 12px;margin:10px 0}
 .fest-box label{margin-bottom:6px}.fest-box .hint{margin:4px 0 0}.fest-box .link{font-size:.875rem;margin-left:4px}
 .aiat{color:var(--mut)}
+.btn-done{background:var(--ok);border-color:var(--ok);color:var(--card);font-weight:700}
+.btn-done:hover{filter:brightness(1.08);border-color:var(--ok)}
+.tag.pubtag{background:var(--ok);border-color:var(--ok);color:var(--card);font-weight:700}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
