@@ -254,3 +254,5 @@ dialog::backdrop{background:rgb(0 0 0 / .45)}
 .grade-tabs button[aria-selected="true"] .grade{color:inherit}
 .grade-tabs button:disabled{opacity:.4;cursor:default}
 button.copied,button.copied:hover{background:var(--ok);border-color:var(--ok);color:var(--bg)}
+.besttime{display:flex;flex-direction:column;gap:2px;margin:8px 0 4px;padding:8px 10px;border-left:3px solid var(--acc);background:var(--bg);border-radius:8px;font-size:.875rem;line-height:1.5}
+.besttime b{font-size:.8125rem;color:var(--acc)}

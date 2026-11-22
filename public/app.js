@@ -433,8 +433,24 @@ function renderPub() {
   // 待發布與已發布放在同一個清單，標記已發布後留在原位置（依加入時間排序）
   const all = items.filter((i) => INQ(i) || i.status === 'done').sort((a, b) => String(a.queuedAt || a.publishedAt || a.createdAt).localeCompare(String(b.queuedAt || b.publishedAt || b.createdAt)));
   $('#pubQueueN').textContent = all.filter(INQ).length; $('#pubDoneN').textContent = all.filter((i) => i.status === 'done').length;
-  $('#pubQueue').innerHTML = all.length ? all.map(pubRow).join('') : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
+  // 狀態篩選：全部／待發布／已發布
+  const nq = all.filter(INQ).length, nd = all.length - nq;
+  $('#pubChips').innerHTML = [['all', '全部', all.length], ['todo', '待發布', nq], ['done', '已發布', nd]]
+    .map(([k, l, n]) => `<button type="button" role="tab" data-act="pubSel" data-f="${k}" aria-selected="${pubSel === k}">${l} <span class="n">${n}</span></button>`).join('');
+  const arr = all.filter((i) => pubSel === 'all' || (pubSel === 'done' ? i.status === 'done' : INQ(i)));
+  pubShown = arr.map((i) => i.id);
+  $('#pubQueue').innerHTML = arr.length ? arr.map(pubRow).join('')
+    : all.length ? `<p class="empty">沒有${pubSel === 'done' ? '已發布' : '待發布'}的商品。</p>`
+    : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
   updPubBtns();
+}
+let pubSel = 'all', pubShown = [];
+// AI 文案裡的建議發文時段（舊資料沒有 aiData 時，從文字版「發文時段：」那行取出）
+function bestTimeOf(i) {
+  const b = i.aiData && i.aiData.json && i.aiData.json.bestTime;
+  if (b) return typeof b === 'string' ? b : JSON.stringify(b);
+  const m = /發文時段：(.+)/.exec(i.aiText || '');
+  return m ? m[1].trim() : '';
 }
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
@@ -446,6 +462,7 @@ function pubRow(i) {
     <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${safeUrl(i.url) ? `<a href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</span></div>
     <div class="pc-row"><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
+    ${bestTimeOf(i) ? `<div class="besttime"><b>⏰ 建議發文時段</b><span>${esc(bestTimeOf(i))}</span></div>` : ''}
     <div class="acts">
       ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button>`}
       ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
@@ -705,7 +722,8 @@ const ACT = {
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
   festFill() { $('#festText').value = festAuto(); toast(festAuto() ? '已帶入近三週節慶' : '近三週沒有節慶'); },
-  pubAll() { items.filter(INPUB).forEach((i) => pubPicked.add(i.id)); renderPub(); },
+  pubAll() { pubShown.forEach((id) => pubPicked.add(id)); renderPub(); },
+  pubSel(b) { pubSel = b.dataset.f; renderPub(); },
   pubNone() { pubPicked.clear(); renderPub(); },
   pubDoneSel() {
     const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
