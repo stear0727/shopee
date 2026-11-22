@@ -360,36 +360,44 @@ function makeItem(p) {
 }
 function rescore(i) { const r = scoreOf(i); i.total = r.total; i.grade = r.grade; i.rate = num(i.base) + num(i.xtra); }
 /* ========== AI 文案 ========== */
+// AI 回傳的欄位轉成可顯示的文字：空值（null）不顯示，物件／陣列只取裡面的文字
+function aiTxt(x) {
+  if (x == null) return '';
+  if (Array.isArray(x)) return x.map(aiTxt).filter(Boolean).join('、');
+  if (typeof x === 'object') return Object.values(x).map(aiTxt).filter(Boolean).join('｜');
+  const t = String(x).trim();
+  return /^(null|undefined|none|n\/a)*$/i.test(t) ? '' : t;
+}
 function renderAnalyze(j, p) {
   const o = j.json, sub = subId(p);
-  const L = (a) => (Array.isArray(a) && a.length ? `<ul>${a.map((x) => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : '<p class="muted">（無）</p>');
+  const L = (a) => { const v = (Array.isArray(a) ? a : []).map(aiTxt).filter(Boolean); return v.length ? `<ul>${v.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="muted">（無）</p>'; };
   let h, t;
   if (o && typeof o === 'object' && !Array.isArray(o)) {
-    const str = (x) => (typeof x === 'string' ? x : JSON.stringify(x));
+    const str = aiTxt;
     const posts = (Array.isArray(o.posts) ? o.posts : []).filter((x) => typeof x === 'string' && x.trim()).slice(0, 5);
     posts.forEach((x, n) => { outText['post' + n] = x; });
     const long = typeof o.longPost === 'string' ? o.longPost.trim() : '';
     if (long) outText.postLong = long;
     const car = Array.isArray(o.carousel) ? o.carousel : [];
-    const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).join(' ');
+    const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).map(aiTxt).filter(Boolean).join(' ');
     const replies = Array.isArray(o.replies) ? o.replies : [];
     const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' && o.festivalPost.post.trim() ? o.festivalPost : null;
     if (fp) outText.postFest = fp.post;
-    h = `<p class="verdict">${esc(o.verdict)}</p>
+    h = `<p class="verdict">${esc(aiTxt(o.verdict))}</p>
     ${fp ? `<h3>🎉 節慶活動文案（${esc(fp.festival || '近期節慶')}）</h3><div class="post fest"><p>${esc(fp.post)}</p><button type="button" data-act="copy" data-k="postFest">複製</button></div>` : ''}
     ${posts.length ? `<h3>短貼文（Threads／IG／FB，可直接複製）</h3>${posts.map((x, n) => `<div class="post"><p>${esc(x)}</p><button type="button" data-act="copy" data-k="post${n}">複製</button></div>`).join('')}` : ''}
     ${long ? `<h3>心得長文（FB 社團／Dcard）</h3><div class="post"><p>${esc(long)}</p><button type="button" data-act="copy" data-k="postLong">複製</button></div>` : ''}
     <h3>吸睛第一句</h3>${L(o.headlines || o.hooks)}
-    ${car.length ? `<h3>IG 多圖輪播規劃</h3><div class="tw"><table><thead><tr><th>張數</th><th>圖上大字</th><th>說明</th></tr></thead><tbody>${car.map((s, n) => `<tr><td>${esc(s?.slide || `第 ${n + 1} 張`)}</td><td>${esc(s?.title)}</td><td>${esc(s?.text)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${car.length ? `<h3>IG 多圖輪播規劃</h3><div class="tw"><table><thead><tr><th>張數</th><th>圖上大字</th><th>說明</th></tr></thead><tbody>${car.map((s, n) => `<tr><td>${esc(s?.slide || `第 ${n + 1} 張`)}</td><td>${esc(aiTxt(s?.title))}</td><td>${esc(aiTxt(s?.text))}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <h3>實拍照片建議</h3>${L(o.imageIdeas)}
     <div class="grid2"><div><h3>優勢</h3>${L(o.strengths)}</div><div><h3>風險</h3>${L(o.risks)}</div></div>
-    <h3>CTA 與連結放置</h3><p>${esc(o.cta)}</p>
+    <h3>CTA 與連結放置</h3><p>${esc(aiTxt(o.cta))}</p>
     <h3>Hashtag</h3><p>${esc(tags)}</p>
-    ${o.bestTime ? `<h3>建議發文時段</h3><p>${esc(str(o.bestTime))}</p>` : ''}
+    ${aiTxt(o.bestTime) ? `<h3>建議發文時段</h3><p>${esc(aiTxt(o.bestTime))}</p>` : ''}
     ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
-    const ls = (a) => (Array.isArray(a) ? a.map((x) => `- ${str(x)}`).join('\n') : '');
-    t = `【${p.name}】${o.verdict || ''}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${o.cta || ''}\nHashtag：${tags}\n${o.bestTime ? `發文時段：${str(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    const ls = (a) => (Array.isArray(a) ? a.map(aiTxt).filter(Boolean).map((x) => `- ${x}`).join('\n') : '');
+    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\nHashtag：${tags}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>`; t = j.text + `\n\nSub_id：${sub}`; }
   if (safeUrl(p.aff)) { outText.aff = p.aff; h += `<h3>推廣連結</h3><div class="post"><p>${esc(p.aff)}</p><button type="button" data-act="copy" data-k="aff">複製</button></div>`; t += `\n推廣連結：${p.aff}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
@@ -490,10 +498,10 @@ function schedDlg(i) {
 }
 // AI 文案裡的建議發文時段（舊資料沒有 aiData 時，從文字版「發文時段：」那行取出）
 function bestTimeOf(i) {
-  const b = i.aiData && i.aiData.json && i.aiData.json.bestTime;
-  if (b) return typeof b === 'string' ? b : JSON.stringify(b);
+  const b = aiTxt(i.aiData && i.aiData.json && i.aiData.json.bestTime);
+  if (b) return b;
   const m = /發文時段：(.+)/.exec(i.aiText || '');
-  return m ? m[1].trim() : '';
+  return m ? aiTxt(m[1]) : '';
 }
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
