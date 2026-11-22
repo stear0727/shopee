@@ -164,10 +164,11 @@ a.btn{text-decoration:none}
 .steps{padding-left:1.3em;margin:8px 0}.steps li{margin:8px 0}
 .steps .btn,.steps button{min-height:38px;margin:2px 4px;vertical-align:middle}
 /* 商品卡片 */
-.filters{display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr;margin-bottom:10px}
+.filters{display:grid;gap:8px;grid-template-columns:1fr 1fr;margin-bottom:10px}
 .filters input{grid-column:1/-1}
 .filters input,.filters select{margin:0}
-@media (min-width:768px){.filters{grid-template-columns:2fr 1fr 1fr 1fr 1fr}.filters input{grid-column:auto}}
+@media (min-width:768px){.filters{grid-template-columns:2fr 1fr 1fr}.filters input{grid-column:auto}}
+.cat-tabs{flex-wrap:wrap;overflow:visible}.cat-tabs .n{opacity:.75;font-size:.8125rem;margin-left:2px}
 .filters select:last-child{grid-column:auto}
 .rk{display:inline-block;min-width:2.2em;text-align:center;font-weight:800;color:var(--mut);margin-right:4px}
 .rk.top{color:var(--acc)}
