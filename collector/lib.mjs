@@ -88,7 +88,7 @@ export function toCSV(products) {
   const now = new Date().toISOString();
   const rows = products.sort((a, b) => worth(b) - worth(a)).map((p) => {
     const trust = Number(p.rating) >= 4.7 && Number(p.sales) >= 1000 ? 5 : Number(p.rating) >= 4.5 ? 4 : 3;
-    return { ...p, base: p.rate, xtra: 0, platform: 'reels', format: '開箱', visual: 3, pain: 3, trust, topic: 3, risk: 3, fit: 3, status: 'watch', note: '',
+    return { ...p, base: p.rate, xtra: 0, platform: 'fb', format: '圖文貼文', visual: 3, pain: 3, trust, topic: 3, risk: 3, fit: 3, status: 'watch', note: '',
       trend: '', summary: `蝦皮後台擷取${p.rate !== '' ? `｜分潤 ${p.rate}%` : ''}${p.sales !== '' ? `｜銷量 ${p.sales}` : ''}`, src: 'shopee', createdAt: now };
   });
   return '﻿' + [COLS.join(','), ...rows.map((r) => COLS.map((c) => cell(r[c])).join(','))].join('\r\n');

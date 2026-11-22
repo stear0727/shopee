@@ -18,11 +18,14 @@ function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('s
 const stat = (label, val, sub = '', cls = '') => `<div class="stat ${cls}"><span>${esc(label)}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
 
 /* ========== 常數 ========== */
-const PLATFORMS = { reels: 'Instagram Reels', fb: 'Facebook Reels', shorts: 'YouTube Shorts', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮短影音', other: '其他' };
+const PLATFORMS = { fb: 'Facebook（粉專／社團）', ig: 'Instagram', threads: 'Threads', line: 'LINE 社群／官方帳號', dcard: 'Dcard／PTT', other: '其他社群' };
+// 舊版資料使用的平台代碼，只用於顯示
+const LEGACY = { reels: 'Instagram', shorts: 'YouTube', tiktok: 'TikTok', shopee_video: '蝦皮' };
+const platName = (k) => PLATFORMS[k] || LEGACY[k] || k;
 const SOURCES = { ...PLATFORMS, ai_search: 'AI 網路搜尋' };
 const SRC_KEYS = Object.keys(SOURCES);
-const SRC_SHORT = { reels: 'IG', fb: 'FB', shorts: 'YT', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮', other: '其他', ai_search: 'AI 搜尋' };
-const FORMATS = ['開箱', '前後對比', '教學示範', '情境短劇', '清單推薦', '實測評比'];
+const SRC_SHORT = { fb: 'FB', ig: 'IG', threads: 'Threads', line: 'LINE', dcard: 'Dcard', other: '其他', ai_search: 'AI 搜尋', reels: 'IG', shorts: 'YT', tiktok: 'TikTok', shopee_video: '蝦皮' };
+const FORMATS = ['圖文貼文', '多圖輪播', '限時動態', '社團分享長文', 'Threads 短文', '清單推薦', '比價懶人包', '開箱心得'];
 const STATUS = { watch: '觀望中', todo: '待拍', copy: '已產文案', done: '已發布', drop: '淘汰' };
 const ACTIVE = ['watch', 'todo', 'copy'];
 const SORTS = { rec: '綜合推薦', rate: '佣金高低', score: '分數高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
@@ -56,25 +59,25 @@ const normAI = (list, max = 50) => list.slice(0, max).map((x, i) => ({
   trend: ['上升', '持平', '下降'].includes(x?.trend) ? x.trend : '', note: String(x?.reason ?? '').slice(0, 200), url: safeUrl(x?.sourceUrl),
 })).filter((x) => x.productName);
 const DIMS = [
-  { k: 'visual', n: '視覺展示力', s: '視覺', w: 18, q: '3 秒內能不能用畫面看懂效果？' },
+  { k: 'visual', n: '圖片吸睛度', s: '吸睛', w: 18, q: '一張實拍照片就能看出賣點或效果嗎？' },
   { k: 'pain', n: '痛點與需求強度', s: '痛點', w: 14, q: '觀眾是否已經在找解決方法？' },
   { k: 'trust', n: '銷量與評價信任度', s: '信任', w: 14, q: '評分、評價數、近期銷量是否足以建立信任？' },
   { k: 'topic', n: '話題性與季節性', s: '話題', w: 10, q: '現在是不是好時機（檔期、天氣、話題）？' },
   { k: 'risk', n: '退貨與客訴風險', s: '低風險', w: 10, q: '越安全分越高：尺寸、色差、功效爭議是否容易造成退貨？' },
-  { k: 'fit', n: '平台契合度', s: '契合', w: 10, q: '這個商品適不適合選定的平台與形式？' },
+  { k: 'fit', n: '社群契合度', s: '契合', w: 10, q: '適不適合你的粉絲／社團受眾與選定的貼文形式？' },
   { k: 'price', n: '價格帶衝動度', s: '價格', w: 12, auto: 1 },
   { k: 'rate', n: '佣金吸引力', s: '佣金', w: 12, auto: 1 },
 ];
 const USER_DIMS = DIMS.filter((d) => !d.auto);
-const GRADE_ACT = { S: '主打，本週優先拍攝', A: '正式製作，穩定發片', B: '小量測試，用 A/B 鉤子驗證', C: '不建議投入製作時間' };
+const GRADE_ACT = { S: '主打，本週優先發文', A: '正式發文，穩定推薦', B: '小量測試，用不同開頭 A/B 測試', C: '不建議花時間寫文' };
 const ELIG = ['我是蝦皮用戶', '任一社群平台約有 300 位好友／追蹤', '已申請並通過蝦皮分潤審核', '已備妥收款與勞報單資料', '了解貼文需揭露含分潤連結'];
 
 /* ========== 狀態（localStorage） ========== */
 const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const DEF_HEAT = { best: 0.5, days: 0.3, cover: 0.2 };
 const _s = store.get('settings', {});
-const S = { accessCode: '', ownKey: '', sources: ['reels', 'fb', 'shorts', 'tiktok'], ..._s, weights: { ...DEF_W, ..._s.weights }, heat: { ...DEF_HEAT, ..._s.heat }, alias: { ..._s.alias } };
-const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'reels', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
+const S = { accessCode: '', ownKey: '', sources: ['fb', 'ig', 'threads', 'dcard'], ..._s, weights: { ...DEF_W, ..._s.weights }, heat: { ...DEF_HEAT, ..._s.heat }, alias: { ..._s.alias } };
+const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
 let draft = { ...blankDraft(), ...store.get('draft', {}) };
 const DEF_CALC = { price: 399, base: 6, xtra: 2, cap: '', valid: 85, views: 5000, videos: 12, ctr: 1.5, cvr: 3, hours: 2.5, target: 10000 };
 let calc = { ...DEF_CALC, ...store.get('calc', {}) };
@@ -153,10 +156,10 @@ function rankChart(rs) {
     const c = 's' + Math.max(0, SRC_KEYS.indexOf(s));
     const pts = dates.map((d, j) => { const v = rs2.filter((r) => r.date === d && r.source === s).map((r) => num(r.rank)); return v.length ? [X(j), Y(Math.min(...v)), d, Math.min(...v)] : null; }).filter(Boolean);
     if (pts.length > 1) g += `<polyline class="ln ${c}" points="${pts.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}"/>`;
-    g += pts.map((p) => `<circle class="${c}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4"><title>${esc(SOURCES[s] || s)} ${p[2]}：#${p[3]}</title></circle>`).join('');
+    g += pts.map((p) => `<circle class="${c}" cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4"><title>${esc(SOURCES[s] || platName(s))} ${p[2]}：#${p[3]}</title></circle>`).join('');
   }
-  const legend = srcs.map((s) => `<span class="s${Math.max(0, SRC_KEYS.indexOf(s))}"><i></i>${esc(SOURCES[s] || s)}</span>`).join('');
-  const alt = rs2.map((r) => `${r.date} ${SOURCES[r.source] || r.source} 第 ${r.rank} 名`).join('；');
+  const legend = srcs.map((s) => `<span class="s${Math.max(0, SRC_KEYS.indexOf(s))}"><i></i>${esc(SOURCES[s] || platName(s))}</span>`).join('');
+  const alt = rs2.map((r) => `${r.date} ${SOURCES[r.source] || platName(r.source)} 第 ${r.rank} 名`).join('；');
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="名次走勢（越上方名次越前）：${esc(alt)}">${g}</svg><div class="legend">${legend}</div>`;
 }
 
@@ -371,7 +374,7 @@ function makeItem(p) {
 function rescore(i) { const r = scoreOf(i); i.total = r.total; i.grade = r.grade; i.rate = num(i.base) + num(i.xtra); }
 function itemFromAI(x, platform) {
   const trust = num(x.rating) >= 4.7 && num(x.sales) >= 1000 ? 5 : num(x.rating) >= 4.5 ? 4 : 3;
-  const it = makeItem({ ...blankDraft(), name: x.productName, category: autoCat(x.productName, x.category), price: x.price, base: x.rate, platform: PLATFORMS[platform] ? platform : 'reels',
+  const it = makeItem({ ...blankDraft(), name: x.productName, category: autoCat(x.productName, x.category), price: x.price, base: x.rate, platform: PLATFORMS[platform] ? platform : 'fb',
     scores: { ...blankDraft().scores, topic: x.trend === '上升' ? 5 : 4, trust }, discount: x.discount, rating: x.rating, sales: x.sales, trend: x.trend, summary: x.note, url: x.url, src: 'ai' });
   it.status = 'watch';
   return it;
@@ -395,7 +398,7 @@ function renderCalc() {
   const heat = `<div class="tw"><table class="heat"><caption class="hint">月收益（元）；列為 CVR、欄為 CTR</caption><thead><tr><th>CVR＼CTR</th>${CT.map((x) => `<th>${x}%</th>`).join('')}</tr></thead><tbody>${grid.map((row, i) => `<tr><th>${CV[i]}%</th>${row.map((v) => `<td class="h${Math.min(4, Math.floor((v / mx) * 4.999))}">${fmt(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   $('#calcOut').innerHTML = `<div class="stats">
     ${stat('單筆期望佣金', fmt(c.exp, 1) + ' 元')}${stat('月訂單', fmt(c.orders) + ' 筆')}${stat('月收益', fmt(c.rev) + ' 元', '', 'hl')}
-    ${stat('每千次曝光收益', fmt(c.rpm, 1) + ' 元')}${stat('時薪', fmt(c.hourly) + ' 元')}${stat('達標月曝光', Number.isFinite(c.need) ? fmt(c.need) : '—', Number.isFinite(c.needPer) ? `約每支 ${fmt(c.needPer)} 觀看` : '')}
+    ${stat('每千次曝光收益', fmt(c.rpm, 1) + ' 元')}${stat('時薪', fmt(c.hourly) + ' 元')}${stat('達標月曝光', Number.isFinite(c.need) ? fmt(c.need) : '—', Number.isFinite(c.needPer) ? `約每則 ${fmt(c.needPer)} 觸及` : '')}
   </div>
   <div class="card"><h2>情境分析</h2><div class="tw"><table><thead><tr><th>情境</th><th>月曝光</th><th>月訂單</th><th>月收益</th><th>時薪</th></tr></thead><tbody>${sc}</tbody></table></div></div>
   <div class="card"><h2>CTR × CVR 敏感度</h2>${heat}</div>
@@ -425,16 +428,28 @@ function renderAnalyze(j, p) {
   const L = (a) => (Array.isArray(a) && a.length ? `<ul>${a.map((x) => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : '<p class="muted">（無）</p>');
   let h, t;
   if (o && typeof o === 'object' && !Array.isArray(o)) {
-    const script = Array.isArray(o.script) ? o.script : [];
+    const str = (x) => (typeof x === 'string' ? x : JSON.stringify(x));
+    const posts = (Array.isArray(o.posts) ? o.posts : []).filter((x) => typeof x === 'string' && x.trim()).slice(0, 5);
+    posts.forEach((x, n) => { outText['post' + n] = x; });
+    const long = typeof o.longPost === 'string' ? o.longPost.trim() : '';
+    if (long) outText.postLong = long;
+    const car = Array.isArray(o.carousel) ? o.carousel : [];
+    const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).join(' ');
+    const replies = Array.isArray(o.replies) ? o.replies : [];
     h = `<p class="verdict">${esc(o.verdict)}</p>
+    ${posts.length ? `<h3>短貼文（Threads／IG／FB，可直接複製）</h3>${posts.map((x, n) => `<div class="post"><p>${esc(x)}</p><button type="button" data-act="copy" data-k="post${n}">複製</button></div>`).join('')}` : ''}
+    ${long ? `<h3>心得長文（FB 社團／Dcard）</h3><div class="post"><p>${esc(long)}</p><button type="button" data-act="copy" data-k="postLong">複製</button></div>` : ''}
+    <h3>吸睛第一句</h3>${L(o.headlines || o.hooks)}
+    ${car.length ? `<h3>IG 多圖輪播規劃</h3><div class="tw"><table><thead><tr><th>張數</th><th>圖上大字</th><th>說明</th></tr></thead><tbody>${car.map((s, n) => `<tr><td>${esc(s?.slide || `第 ${n + 1} 張`)}</td><td>${esc(s?.title)}</td><td>${esc(s?.text)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    <h3>實拍照片建議</h3>${L(o.imageIdeas)}
     <div class="grid2"><div><h3>優勢</h3>${L(o.strengths)}</div><div><h3>風險</h3>${L(o.risks)}</div></div>
-    <h3>開場鉤子</h3>${L(o.hooks)}
-    <h3>分鏡腳本</h3><div class="tw"><table><thead><tr><th>時間</th><th>畫面</th><th>口播</th></tr></thead><tbody>${script.map((s) => `<tr><td>${esc(s?.time)}</td><td>${esc(s?.visual)}</td><td>${esc(s?.voice)}</td></tr>`).join('')}</tbody></table></div>
-    <h3>CTA</h3><p>${esc(o.cta)}</p>
-    <h3>標籤</h3><p>${esc((Array.isArray(o.hashtags) ? o.hashtags : []).join(' '))}</p>
+    <h3>CTA 與連結放置</h3><p>${esc(o.cta)}</p>
+    <h3>Hashtag</h3><p>${esc(tags)}</p>
+    ${o.bestTime ? `<h3>建議發文時段</h3><p>${esc(str(o.bestTime))}</p>` : ''}
+    ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
-    const ls = (a) => (Array.isArray(a) ? a.map((x) => `- ${typeof x === 'string' ? x : JSON.stringify(x)}`).join('\n') : '');
-    t = `【${p.name}】${o.verdict || ''}\n\n優勢\n${ls(o.strengths)}\n\n風險\n${ls(o.risks)}\n\n開場鉤子\n${ls(o.hooks)}\n\n分鏡腳本\n${script.map((s) => `${s?.time}｜${s?.visual}｜${s?.voice}`).join('\n')}\n\nCTA：${o.cta || ''}\n標籤：${(o.hashtags || []).join(' ')}\n\nA/B 測試\n${ls(o.tests)}\n\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    const ls = (a) => (Array.isArray(a) ? a.map((x) => `- ${str(x)}`).join('\n') : '');
+    t = `【${p.name}】${o.verdict || ''}\n\n${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${o.cta || ''}\nHashtag：${tags}\n${o.bestTime ? `發文時段：${str(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>`; t = j.text + `\n\nSub_id：${sub}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
   return outCard('analyze', h, j, t);
@@ -491,7 +506,7 @@ function cardItem(i, idx) {
     ${stars || trend ? `<div class="pc-row"><span>${stars}</span>${trend}</div>` : ''}
     ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
     <div class="pc-row sm"><span>推薦指數 <b>${recMap[i.id] ?? '—'}</b>｜<span class="grade g${i.grade}">${i.grade}</span> ${fmt(i.total, 1)} 分｜單筆約 ${fmt(expOf(i), 1)} 元</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
-    ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觀看／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
+    ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觸及／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
     <select data-act="status" data-id="${id}" aria-label="${esc(i.name)} 狀態">${opts(STATUS, i.status)}</select>
     <div class="acts"><button type="button" data-act="itemAI" data-id="${id}">AI 產文案</button>${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemToScore" data-id="${id}">評分</button><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
@@ -511,7 +526,7 @@ function editItem(id) {
     </div>
     <label>商品網址<input name="url" type="url" maxlength="500" value="${esc(i.url)}"></label>
     <label>備註<textarea name="note" rows="2" maxlength="500">${esc(i.note)}</textarea></label>
-    <h3>實際成效回填（復盤）</h3><div class="row2">${nf('views', '觀看', a.views)}${nf('clicks', '點擊', a.clicks)}${nf('orders', '訂單', a.orders)}${nf('commission', '佣金（元）', a.commission)}</div>
+    <h3>實際成效回填（復盤）</h3><div class="row2">${nf('views', '觸及', a.views)}${nf('clicks', '點擊', a.clicks)}${nf('orders', '訂單', a.orders)}${nf('commission', '佣金（元）', a.commission)}</div>
     <p class="hint">分潤比例請以蝦皮分潤後台為準；修改後分數會自動重算。</p>
     <div class="btns"><button value="cancel" formnovalidate>取消</button><button value="ok" class="pri">儲存</button></div></form>`;
   d.returnValue = '';
@@ -860,7 +875,7 @@ document.addEventListener('submit', async (e) => {
 
 /* ========== 蝦皮擷取書籤（此函式不在本站執行，而是轉成書籤程式碼在蝦皮頁面執行） ========== */
 function shopeeGrab(SITE) {
-  const VER = '4';
+  const VER = '5';
   if (window.__spg && window.__spg.dataset && window.__spg.dataset.v === VER) { window.__spg.style.display = 'block'; return; }
   if (window.__spg) { /* 頁面上是舊版擷取：先停掉再換新版 */ try { if (window.__spgStop) window.__spgStop(); else window.__spg.remove(); } catch (e) { /* 略過 */ } }
   const NAME = ['name', 'item_name', 'product_name', 'productName', 'itemName', 'title'];
@@ -883,9 +898,19 @@ function shopeeGrab(SITE) {
   /* 擷取結果存在蝦皮網站的本機儲存空間：換頁、重新整理、開新分頁後再點書籤即可接續 */
   const KEY = 'spg_items_v1';
   const items = new Map();
-  try { JSON.parse(localStorage.getItem(KEY) || '[]').forEach((p) => items.set(p.id, p)); } catch (e) { /* 無法讀取 */ }
-  let saveT = 0;
-  const persist = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify([...items.values()].slice(-2000))); } catch (e) { /* 空間不足 */ } }, 400); };
+  /* 從儲存空間合併其他分頁擷取的結果（例如在新分頁讀到的分潤率），只補空白欄位、不覆蓋 */
+  const loadMerge = () => {
+    try {
+      for (const p of JSON.parse(localStorage.getItem(KEY) || '[]')) {
+        const o = items.get(p.id);
+        if (!o) items.set(p.id, p); else for (const k in p) if (p[k] !== '' && p[k] != null && (o[k] === '' || o[k] == null)) o[k] = p[k];
+      }
+    } catch (e) { /* 無法讀取 */ }
+  };
+  loadMerge();
+  let saveT = 0, cleared = false;
+  const persist = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { if (!cleared) loadMerge(); cleared = false; localStorage.setItem(KEY, JSON.stringify([...items.values()].slice(-2000))); } catch (e) { /* 空間不足 */ } }, 400); };
+  window.addEventListener('storage', (e) => { if (e.key !== KEY) return; if (!e.newValue || e.newValue === '[]') items.clear(); else loadMerge(); const n = box.querySelector('[data-n]'), r = box.querySelector('[data-r]'); if (n) n.textContent = items.size; if (r) r.textContent = [...items.values()].filter((p) => p.commissionRate !== '' && p.commissionRate != null).length; });
   let budget = 0;
   const walk = (node, d, out) => {
     if (budget-- <= 0 || d > 10 || !node || typeof node !== 'object') return;
@@ -967,9 +992,15 @@ function shopeeGrab(SITE) {
     say(found ? '本頁找到 ' + found + ' 件，新增 ' + added + ' 件' : '本頁沒有找到商品資料：請等頁面載入完成再按一次；若仍為 0，切到別頁再切回來後再按');
   };
   /* 你手動點進商品詳情頁時，自動讀取分潤比例（列表頁仍需手動按「擷取這一頁」） */
-  let lastDetail = '';
+  let lastDetail = '', warned = '';
   const autoDetail = () => {
-    const d = scanDetail(); if (!d) return;
+    const d = scanDetail();
+    if (!d) {
+      /* 在詳情頁卻讀不到分潤表時，顯示原因方便排查 */
+      const m = location.pathname.match(/product_offer\/(\d+)/);
+      if (m && warned !== m[1] && document.readyState === 'complete') { warned = m[1]; setTimeout(() => { if (!scanDetail()) say('這是商品詳情頁，但畫面上找不到「社群媒體 x%」的分潤表，請截圖給 Claude'); }, 4000); }
+      return;
+    }
     const sig = d.id + '|' + d.channelRates; if (sig === lastDetail) return;
     lastDetail = sig; upd(); say('已自動讀取分潤：' + (d.productName || '').slice(0, 16) + '… ' + d.commissionRate + '%');
   };
@@ -987,13 +1018,14 @@ function shopeeGrab(SITE) {
   box.querySelector('[data-cap]').onclick = capture;
   box.querySelector('[data-min]').onclick = () => { const h = body.style.display === 'none'; body.style.display = h ? 'block' : 'none'; box.querySelector('[data-min]').textContent = h ? '－' : '＋'; };
   box.querySelector('[data-s]').onclick = () => {
+    loadMerge();
     if (!items.size) { alert('還沒擷取到商品：請先在列表頁按「擷取這一頁」'); return; }
     const s = btoa(unescape(encodeURIComponent(JSON.stringify([...items.values()].slice(0, 1000)))));
     window.open(SITE + '/#import=' + encodeURIComponent(s), '_blank');
   };
   box.querySelector('[data-clr]').onclick = () => {
     if (!confirm('清空已擷取的 ' + items.size + ' 件商品？（已送到選品網站的不受影響）')) return;
-    items.clear(); try { localStorage.removeItem(KEY); } catch (e) { /* 略過 */ } upd();
+    items.clear(); cleared = true; try { localStorage.removeItem(KEY); } catch (e) { /* 略過 */ } upd();
   };
   const stop = () => {
     window.fetch = of; XMLHttpRequest.prototype.send = os; clearInterval(iv); persist();
@@ -1029,14 +1061,14 @@ function checkImport() {
     });
     if (upd) { save.i(); toast(`已更新清單中 ${upd} 件商品的分潤與數字`); }
     disc = normAI(rest.map((x, i) => ({ ...x, rank: i + 1, reason: `蝦皮後台擷取${x.channelRates ? `｜${x.channelRates}` : x.commissionRate ? `｜分潤 ${x.commissionRate}%` : ''}${x.monthlySales ? `｜銷量 ${x.monthlySales}` : ''}` })), 1000);
-    discPlat = 'reels'; discMeta = { sources: [], meta: null, src: 'shopee' };
+    discPlat = 'fb'; discMeta = { sources: [], meta: null, src: 'shopee' };
     return true;
   } catch { toast('擷取資料格式錯誤，請重新擷取'); return false; }
 }
 
 /* ========== 初始化 ========== */
-$$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
-$$('select[data-opt="source"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
+$$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'fb'); });
+$$('select[data-opt="source"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'fb'); });
 $$('select[data-opt="platformAll"]').forEach((s) => { s.innerHTML = opts({ all: '全部平台', ...PLATFORMS }, 'all'); });
 $('#listFilter').innerHTML = opts({ all: '全部狀態', ...STATUS }, 'all');
 $('#listSort').innerHTML = opts(SORTS, 'rec');

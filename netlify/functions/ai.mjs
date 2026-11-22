@@ -5,15 +5,18 @@ const TASKS = new Set(['analyze', 'plan', 'trend', 'portfolio', 'rank_extract', 
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
 const MAX_IMAGE = 2_200_000;            // 壓縮後截圖 base64 上限（約 1.6 MB 原始）
 const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
-const PLAT = { reels: 'Instagram Reels', fb: 'Facebook Reels', shorts: 'YouTube Shorts', tiktok: 'TikTok', threads: 'Threads', shopee_video: '蝦皮短影音', other: '其他' };
+const PLAT = { fb: 'Facebook（粉專／社團）', ig: 'Instagram（貼文／限動）', threads: 'Threads', line: 'LINE 社群／官方帳號', dcard: 'Dcard／PTT', other: '其他社群',
+  reels: 'Instagram', shorts: 'YouTube', tiktok: 'TikTok', shopee_video: '蝦皮' };
+const SOCIAL = 'Facebook 粉專與社團、Instagram、Threads、LINE 社群、Dcard／PTT';
 
-const SYS = `你是電商聯盟行銷分析師，專精蝦皮分潤計畫與短影音帶貨（Instagram Reels、Facebook Reels、YouTube Shorts、TikTok、Threads）。
+const SYS = `你是電商聯盟行銷分析師，專精蝦皮分潤計畫與社群媒體圖文帶貨（${SOCIAL}）。
 規則：
-1. 一律使用繁體中文（台灣用語）。
+1. 一律使用繁體中文（台灣用語），語氣像真人分享，不要像廣告。
 2. 禁止捏造銷量、評價數、佣金率、價格等數字；資料不足時必須明確標示「假設」。
-3. 開場鉤子必須在前 2–3 秒產生效果，並依平台調整長度與語氣。
-4. 一律提醒：貼文需揭露含分潤連結或合作關係、避免誇大或不實功效、價格與活動標註時效、錄製實際使用畫面、不使用蝦皮商標造成官方誤認。
-5. 精簡，不寫開場白與客套話。`;
+3. 貼文第一句就要抓住注意力（痛點、反差、驚喜或數字），並依平台調整長度與語氣：Threads 短而口語、Facebook 社團可較長且重實用資訊、Instagram 搭配圖片與 hashtag、LINE 社群重優惠與限時感。
+4. 分潤連結通常放在留言、限動連結或個人頁，請依平台建議。
+5. 一律提醒：貼文需揭露含分潤連結或合作關係、避免誇大或不實功效、價格與活動標註時效、使用實拍照片、不使用蝦皮商標造成官方誤認、遵守社團版規。
+6. 精簡，不寫開場白與客套話。`;
 
 const json = (status, obj) => new Response(JSON.stringify(obj), {
   status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -34,30 +37,31 @@ function scores(o) {
 function build(task, p, hasImage) {
   switch (task) {
     case 'analyze':
-      return { json: true, text: `請分析以下候選商品是否值得拍成分潤短影音，並產出企劃。
+      return { json: true, text: `請分析以下候選商品是否值得在社群媒體發分潤貼文，並產出可直接使用的貼文素材。
 商品資料（使用者輸入，未經查證）：
 ${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(p.price), 總佣金率百分比: n(p.rate), 平台: plat(p.platform), 形式: s(p.format, 20), 系統總分: n(p.total), 分級: s(p.grade, 2), 構面評分1到5: scores(p.scores) })}
 只輸出 JSON，結構如下：
-{"verdict":"一句話判斷","strengths":["優勢"],"risks":["風險"],"hooks":["3–5 個開場鉤子"],"script":[{"time":"0–3s","visual":"畫面","voice":"口播"}],"cta":"行動呼籲","hashtags":["#標籤"],"tests":["A/B 測試建議"],"compliance":["合規提醒"]}
-script 5–8 段，總長符合 ${plat(p.platform)} 常見長度。` };
+{"verdict":"一句話判斷","posts":["3 則可直接發布的短貼文：每則 40–80 字、口語自然、第一句就抓住注意力（痛點、反差或驚喜）、帶 1–2 個 emoji、結尾有行動呼籲（例如「連結在留言／個人頁」）並加上「#含分潤連結」與 2–3 個相關 hashtag；三則風格不同（痛點型、開箱驚喜型、限時優惠型）"],"longPost":"一則 150–300 字的使用心得長文，適合 Facebook 社團或 Dcard：真實情境開頭、3 個重點、優缺點都提、結尾 CTA 與揭露","headlines":["3–5 個吸睛的第一句／標題"],"carousel":[{"slide":"第 1 張","title":"圖上大字","text":"說明"}],"imageIdeas":["3–4 個實拍照片建議（拍什麼、怎麼構圖）"],"strengths":["優勢"],"risks":["風險"],"cta":"行動呼籲（含連結放哪裡）","hashtags":["#標籤"],"bestTime":"建議發文時段與理由","replies":["2–3 個預想留言提問與建議回覆"],"tests":["A/B 測試建議"],"compliance":["合規提醒"]}
+carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${plat(p.platform)}，貼文形式：${s(p.format, 20) || '圖文貼文'}。` };
     case 'plan': {
       const days = [7, 14, 30].includes(n(p.days)) ? n(p.days) : 7;
       const prods = (Array.isArray(p.products) ? p.products : []).slice(0, 20).map((x) => s(typeof x === 'string' ? x : x?.name, 80)).filter(Boolean);
-      return { text: `請規劃 ${days} 天的分潤短影音發片行事曆。
+      return { text: `請規劃 ${days} 天的社群分潤貼文發文行事曆。
 題材：${s(p.topic, 100) || '未指定'}
 受眾：${s(p.audience, 150) || '未指定'}
 平台：${plat(p.platform)}
-每週發片數：${n(p.perWeek) ?? 3}
+每週發文數：${n(p.perWeek) ?? 3}
 候選商品：${prods.length ? prods.join('、') : '未提供（請以商品類型代替）'}
 輸出 Markdown：
-1. 一張行事曆表格，欄位：日 | 平台 | 商品 | 角色（主打/引流/話題） | 主題 | 開場鉤子
-2. 每週 KPI（觀看、CTR、訂單），標示為「假設目標」。
+1. 一張行事曆表格，欄位：日 | 時段 | 平台 | 商品 | 角色（主打/引流/話題） | 貼文形式（圖文／輪播／限動／社團長文／Threads 短文） | 第一句
+2. 穿插非業配的互動貼文（投票、生活分享）避免帳號全是廣告，比例約 3:1。
+3. 每週 KPI（觸及、互動、點擊、訂單），標示為「假設目標」。
 不要寫開場白。` };
     }
     case 'trend':
-      return { search: true, text: `請用 Google 搜尋，找出台灣近期與「${s(p.topic, 100) || '生活好物'}」相關、適合在 ${plat(p.platform)} 拍分潤短影音的選題。
+      return { search: true, text: `請用 Google 搜尋，找出台灣近期與「${s(p.topic, 100) || '生活好物'}」相關、適合在 ${plat(p.platform)} 發分潤貼文的選題。
 檔期或時間：${s(p.season, 60) || '近期'}（今天：${new Date().toISOString().slice(0, 10)}）
-輸出 Markdown：5–8 個選題，每個包含「選題、為什麼是現在、建議商品類型、鉤子範例」；最後列出風險。
+輸出 Markdown：5–8 個選題，每個包含「選題、為什麼是現在、建議商品類型、建議貼文形式、第一句範例」；最後列出風險。
 只根據搜尋結果，沒有來源支持的趨勢要標示「推測」。` };
     case 'portfolio': {
       const list = (Array.isArray(p.items) ? p.items : []).slice(0, 20).map((x) => ({
@@ -67,14 +71,14 @@ script 5–8 段，總長符合 ${plat(p.platform)} 常見長度。` };
 ${JSON.stringify(list)}
 請做組合審查，輸出 Markdown：
 1. 組合配置：每項標為「引流款／利潤款／話題款」並說明理由
-2. 本週發片順序表格：順序 | 商品 | 角色 | 理由
+2. 本週發文順序表格：順序 | 商品 | 角色 | 建議平台與貼文形式 | 理由
 3. 組合風險（題材重複、價格帶集中等）與調整建議` };
     }
     case 'rank_search': {
-      const where = PLAT[p.platform] ? PLAT[p.platform] : '社群短影音（Instagram Reels、Facebook Reels、YouTube Shorts、TikTok、Threads）與蝦皮';
+      const where = PLAT[p.platform] ? PLAT[p.platform] : `社群媒體（${SOCIAL}）與蝦皮`;
       const topic = s(p.topic, 100);
       return { search: true, extract: true, low: true, text: `請用 Google 搜尋，找出台灣近 14 天內在 ${where} 上爆紅或熱銷的商品${topic ? `，題材限定「${topic}」` : ''}。今天：${new Date().toISOString().slice(0, 10)}。
-可參考：蝦皮熱銷或熱搜相關報導、TikTok／Reels 熱門帶貨商品、開箱爆紅新聞、團購熱賣文章、比較評測。
+可參考：蝦皮熱銷或熱搜相關報導、Facebook 社團與 Dcard 熱門推薦文、Threads 爆紅分享、團購熱賣文章、開箱與比較評測。
 依「被多少來源提到、熱度多高」排序，最多 20 筆。只列搜尋結果中確實出現的具體商品（要有品牌或明確品名），不要編造。
 數字欄位（price、discount、rating、monthlySales、commissionRate）只有來源明確寫出時才填，否則 null，絕對不要估算或推測。commissionRate 是蝦皮分潤比例（%），一般文章不會寫，找不到就 null。
 只輸出 JSON，不要任何其他文字：

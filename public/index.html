@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>分潤選品分析</title>
-<meta name="description" content="短影音創作者的分潤選品評分、佣金試算與 AI 內容企劃工具（非蝦皮官方）">
+<meta name="description" content="社群媒體經營者的蝦皮分潤選品評分、佣金試算與 AI 貼文企劃工具（非蝦皮官方）">
 <meta name="theme-color" content="#c2410c">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
@@ -43,10 +43,10 @@
 
   <h2>平台策略</h2>
   <div class="grid3">
-    <div class="card"><h3>Instagram Reels</h3><p>2026/7/1 起台灣開放，連結蝦皮分潤帳號後可在 Reels 與動態標記商品；資格細節未公開。</p><p class="hint">建議：9:16、15–30 秒，前 2 秒用前後對比抓眼球。</p></div>
-    <div class="card"><h3>Facebook Reels</h3><p>已有 Facebook 聯盟行銷夥伴計畫（2026/3 全球逾 500 萬創作者連結帳號）。</p><p class="hint">建議：情境短劇、清單推薦，受眾年齡層較廣。</p></div>
-    <div class="card"><h3>YouTube Shorts</h3><p>2026/1 起台灣啟動 YouTube Shopping 聯盟，報導指分潤最高 13.5%，可疊加賣家分潤金。</p><p class="hint">建議：實測評比、教學示範，可長期被搜尋。</p></div>
-    <div class="card"><h3>TikTok／Threads</h3><p>原生標記商品功能未查到公開資料（待確認）。</p><p class="hint">建議：以文案與個人頁連結導流，適合測試話題款。</p></div>
+    <div class="card"><h3>Facebook 粉專／社團</h3><p>受眾年齡層廣，社團討論度高，適合實用型、比價型商品。已有 Facebook 聯盟行銷夥伴計畫。</p><p class="hint">建議：心得長文、比價懶人包、清單推薦；連結放留言，先確認社團版規是否允許分潤連結。</p></div>
+    <div class="card"><h3>Instagram</h3><p>2026/7/1 起台灣開放蝦皮聯盟，連結分潤帳號後可在貼文與動態標記商品；資格細節未公開。</p><p class="hint">建議：多圖輪播（封面大字＋重點）、限動連結貼紙導流、hashtag 曝光。</p></div>
+    <div class="card"><h3>Threads</h3><p>短句與真實分享容易擴散，適合話題款、衝動型低價商品。原生標記商品功能未查到公開資料。</p><p class="hint">建議：40–80 字口語短文＋1 張實拍圖，連結放第一則留言或個人頁。</p></div>
+    <div class="card"><h3>LINE 社群／Dcard</h3><p>LINE 社群重團購感與限時優惠；Dcard／PTT 重真實心得，業配感太重容易被檢舉。</p><p class="hint">建議：LINE 發限時好康整理；Dcard 寫完整使用心得並清楚揭露。</p></div>
   </div>
 
   <div class="card">
@@ -113,14 +113,14 @@
         <label>基本佣金率 %<input name="base" type="number" inputmode="decimal" min="0" step="0.1"></label>
         <label>加碼佣金率 %<input name="xtra" type="number" inputmode="decimal" min="0" step="0.1"></label>
         <label>有效訂單率 %<input name="valid" type="number" inputmode="decimal" min="0" max="100"></label>
-        <label>每支影片觀看<input name="views" type="number" inputmode="numeric" min="0"></label>
-        <label>每月發片數<input name="videos" type="number" inputmode="numeric" min="0"></label>
-        <label>點擊率 CTR %<input name="ctr" type="number" inputmode="decimal" min="0" step="0.1"></label>
-        <label>轉換率 CVR %<input name="cvr" type="number" inputmode="decimal" min="0" step="0.1"></label>
-        <label>每支製作時數<input name="hours" type="number" inputmode="decimal" min="0" step="0.5"></label>
+        <label>每則貼文觸及人數<input name="views" type="number" inputmode="numeric" min="0"></label>
+        <label>每月貼文數<input name="videos" type="number" inputmode="numeric" min="0"></label>
+        <label>點擊率 CTR %（看到→點連結）<input name="ctr" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label>轉換率 CVR %（點連結→下單）<input name="cvr" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label>每則貼文製作時數<input name="hours" type="number" inputmode="decimal" min="0" step="0.5"></label>
         <label>目標月收入（元）<input name="target" type="number" inputmode="numeric" min="0"></label>
       </div>
-      <p class="hint">預設值都是假設，不是蝦皮官方數字。YouTube Shopping 報導分潤上限 13.5%。</p>
+      <p class="hint">預設值都是假設，不是蝦皮官方數字。社群貼文請用蝦皮分潤後台「社群媒體」管道的分潤比例。</p>
       <div id="calib"></div>
     </form>
     <div class="col" id="calcOut" aria-live="polite"></div>
@@ -152,7 +152,7 @@
         <label>題材<input name="topic" maxlength="100" placeholder="例：小資居家收納"></label>
         <label>受眾<input name="audience" maxlength="150" placeholder="例：25–35 歲租屋上班族"></label>
         <label>平台<select name="platform" data-opt="platform"></select></label>
-        <label>每週發片數<input name="perWeek" type="number" inputmode="numeric" min="1" max="21" value="3"></label>
+        <label>每週發文數<input name="perWeek" type="number" inputmode="numeric" min="1" max="21" value="3"></label>
         <label>天數<select name="days"><option value="7">7 天</option><option value="14">14 天</option><option value="30">30 天</option></select></label>
       </div>
       <label>商品（每行一個，最多 20 個）<textarea name="products" rows="4" maxlength="2000"></textarea></label>
@@ -252,11 +252,11 @@
 
   <div class="card">
     <h2>手動新增紀錄</h2>
-    <p class="hint">自己在平台上看到的排行，也可以手動記錄。TikTok Creative Center 榜單依據為廣告商品，只當靈感參考。</p>
+    <p class="hint">自己在 FB 社團、Threads、IG 等看到被大量推薦的商品，也可以手動記錄。</p>
     <form id="fRankMeta" class="row2" autocomplete="off">
       <label>日期<input type="date" name="date"></label>
       <label>榜單來源<select name="source" data-opt="source"></select></label>
-      <label>榜單名稱<input name="listName" maxlength="60" placeholder="例：美妝 Reels 週榜"></label>
+      <label>榜單名稱<input name="listName" maxlength="60" placeholder="例：美妝社團熱門週榜"></label>
       <label>榜單長度 N<input name="listSize" type="number" inputmode="numeric" min="1" max="200" value="20"></label>
     </form>
     <details open>

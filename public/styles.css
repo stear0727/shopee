@@ -190,6 +190,9 @@ a.btn{text-decoration:none}
 .disc-list label{display:flex;gap:10px;align-items:flex-start;color:var(--fg);font-size:.9375rem;border-top:1px solid var(--line);padding:10px 0;margin:0}
 .disc-list input{width:22px;height:22px;min-height:0;margin:2px 0 0;flex:none;accent-color:var(--acc)}
 
+.post{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;background:var(--accbg);border-radius:12px;padding:10px 12px;margin:8px 0}
+.post p{margin:0;white-space:pre-wrap}
+.post button{flex:none;min-height:36px;padding:0 12px}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
