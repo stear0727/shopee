@@ -503,7 +503,7 @@ function renderDisc() {
       <span class="sm">${esc(x.note)}</span>${x.url ? ` <a class="sm" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</span></label>`;
   }).join('')}</div>
   ${discMeta?.sources?.length ? `<details><summary>搜尋來源（${discMeta.sources.length}）</summary><ul>${discMeta.sources.filter((s) => safeUrl(s.uri)).map((s) => `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></li>`).join('')}</ul></details>` : ''}
-  <div class="checks"><label><input type="checkbox" id="discRank" checked>同時記錄到「商品排行」（追蹤熱度變化）</label></div>
+  ${discMeta?.meta ? '<div class="checks"><label><input type="checkbox" id="discRank" checked>同時記錄到「商品排行」（追蹤熱度變化）</label></div>' : ''}
   <div class="btns"><button type="button" class="pri" data-act="discAdd">加入勾選的商品</button><button type="button" data-act="discClear">關閉</button></div>`;
 }
 
@@ -673,11 +673,12 @@ const ACT = {
   discAdd() {
     const pick = $$('[data-dc]').filter((x) => x.checked && !x.disabled).map((x) => disc[+x.dataset.dc]);
     if (!pick.length) { toast('請先勾選商品'); return; }
-    for (const x of pick) items.push(itemFromAI(x, discPlat));
-    if ($('#discRank')?.checked) { for (const x of disc) addRank(x, discMeta.meta); save.r(); }
+    for (const x of pick) { const it = itemFromAI(x, discPlat); if (discMeta?.src) it.src = discMeta.src; items.push(it); }
+    if (discMeta?.meta && $('#discRank')?.checked) { for (const x of disc) addRank(x, discMeta.meta); save.r(); }
     save.i(); disc = []; renderDisc(); renderList(); toast(`已加入 ${pick.length} 件商品，狀態為「觀望中」`);
   },
   discClear() { disc = []; renderDisc(); },
+  copyBm() { copy(bmCode()); },
   fillPlan() { const t = items.filter((i) => ACTIVE.includes(i.status)).sort((a, b) => b.total - a.total).slice(0, 20); $('#fPlan').elements.products.value = t.map((i) => i.name).join('\n'); if (!t.length) toast('清單沒有可用的商品'); },
   async runPortfolio(b) {
     const c = pfItems(), el = $('#out-portfolio');
@@ -815,6 +816,77 @@ document.addEventListener('submit', async (e) => {
   }
 });
 
+/* ========== 蝦皮擷取書籤（此函式不在本站執行，而是轉成書籤程式碼在蝦皮頁面執行） ========== */
+function shopeeGrab(SITE) {
+  if (window.__spg) { window.__spg.style.display = 'block'; return; }
+  const NAME = ['name', 'item_name', 'product_name', 'productName', 'itemName', 'title'];
+  const PRICE = ['price', 'price_min', 'min_price', 'priceMin', 'item_price', 'sale_price', 'product_price', 'price_max'];
+  const ID = ['itemid', 'item_id', 'itemId', 'product_id', 'productId'];
+  const SHOP = ['shopid', 'shop_id', 'shopId'];
+  const RATE = ['commission_rate', 'commissionRate', 'total_commission_rate', 'max_commission_rate', 'default_commission_rate', 'seller_commission_rate', 'sellerCommissionRate', 'shopee_commission_rate', 'commission_rate_str', 'commissionRateStr'];
+  const SOLD = ['historical_sold', 'historicalSold', 'sold', 'monthly_sold', 'sales', 'sold_count', 'item_sold', 'sales_volume', 'sold_text'];
+  const RATING = ['rating_star', 'ratingStar', 'item_rating_star', 'rating'];
+  const DISC = ['raw_discount', 'discount', 'discount_percentage', 'show_discount'];
+  const CAT = ['category_name', 'categoryName', 'cat_name', 'category'];
+  const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  const pick = (o, ks) => { for (const k of ks) if (o[k] !== undefined && o[k] !== null && o[k] !== '') return o[k]; return undefined; };
+  const toNum = (v) => { if (v === undefined || v === null) return NaN; if (typeof v === 'number') return v; const m = String(v).replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(k|K|萬|w|W)?/); return m ? Number(m[1]) * (m[2] === 'k' || m[2] === 'K' ? 1e3 : m[2] ? 1e4 : 1) : NaN; };
+  const nPrice = (v) => { let n = toNum(v); if (!(n > 0)) return ''; if (n >= 1e5) n /= 1e5; return Math.round(n); };
+  const nRate = (v) => { let n = toNum(v); if (!(n > 0)) return ''; if (n <= 1) n *= 100; else if (n > 100) n /= 1000; return n <= 100 ? Math.round(n * 10) / 10 : ''; };
+  const nDisc = (v) => { let n = Math.abs(toNum(v)); if (!(n > 0)) return ''; if (n < 1) n *= 100; return n < 100 ? Math.round(n) : ''; };
+  const nRating = (v) => { const n = toNum(isObj(v) ? v.rating_star : v); return n > 0 && n <= 5 ? Math.round(n * 10) / 10 : ''; };
+  const view = (o) => { const v = { ...o }; for (const c of Object.values(o)) if (isObj(c)) for (const [k, x] of Object.entries(c)) if (v[k] === undefined && typeof x !== 'object') v[k] = x; if (isObj(o.item_rating) && v.rating_star === undefined) v.rating_star = o.item_rating.rating_star; return v; };
+  const items = new Map();
+  let budget = 0;
+  const walk = (node, d, out) => {
+    if (budget-- <= 0 || d > 10 || !node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { for (const x of node) walk(x, d + 1, out); return; }
+    const v = view(node), name = pick(v, NAME), price = pick(v, PRICE), id = pick(v, ID);
+    if (typeof name === 'string' && name.trim().length >= 4 && (price !== undefined || id !== undefined) && pick(v, ['username', 'email', 'phone']) === undefined) {
+      const shop = pick(v, SHOP), cat = pick(v, CAT);
+      out.push({ id: id !== undefined ? 'sp_' + (shop ?? 0) + '_' + id : name.trim(), productName: name.trim().slice(0, 120), price: nPrice(price), commissionRate: nRate(pick(v, RATE)), monthlySales: Math.round(toNum(pick(v, SOLD))) || '', rating: nRating(pick(v, RATING) ?? v.item_rating), discount: nDisc(pick(v, DISC)), category: typeof cat === 'string' ? cat.slice(0, 40) : '', sourceUrl: id !== undefined && shop !== undefined ? 'https://shopee.tw/product/' + shop + '/' + id : '' });
+      return;
+    }
+    for (const c of Object.values(node)) if (c && typeof c === 'object') walk(c, d + 1, out);
+  };
+  const box = document.createElement('div');
+  const feed = (t) => {
+    try {
+      const j = typeof t === 'string' ? JSON.parse(t) : t, out = []; budget = 50000; walk(j, 0, out);
+      for (const p of out) { const o = items.get(p.id); if (!o) items.set(p.id, p); else for (const k in p) if (p[k] !== '' && o[k] === '') o[k] = p[k]; }
+      if (out.length) box.querySelector('b').textContent = items.size;
+    } catch (e) { /* 非 JSON */ }
+  };
+  const of = window.fetch;
+  window.fetch = async function (...a) { const r = await of.apply(this, a); try { const c = r.clone(); if ((c.headers.get('content-type') || '').includes('json')) c.text().then(feed); } catch (e) { /* 略過 */ } return r; };
+  const os = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...a) { this.addEventListener('load', function () { try { if ((this.getResponseHeader('content-type') || '').includes('json')) feed(this.responseType === '' || this.responseType === 'text' ? this.responseText : this.response); } catch (e) { /* 略過 */ } }); return os.apply(this, a); };
+  ['__INITIAL_STATE__', '__NEXT_DATA__', '__APOLLO_STATE__'].forEach((k) => { if (window[k]) feed(window[k]); });
+  document.querySelectorAll('script[type="application/json"]').forEach((s) => feed(s.textContent));
+  box.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:2147483647;background:#fff;color:#1f1a17;border:2px solid #c2410c;border-radius:14px;padding:12px 14px;font:15px/1.5 system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.25);max-width:280px';
+  box.innerHTML = '<div style="font-weight:700;margin-bottom:4px">📥 蝦皮擷取中</div><div>已擷取 <b>0</b> 件商品</div><div style="font-size:13px;color:#625a53;margin:4px 0 8px">請往下捲動、換頁或搜尋，件數會增加</div><button data-s style="background:#c2410c;color:#fff;border:0;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">送到選品網站</button> <button data-x style="background:#fff;border:1px solid #ccc;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer">隱藏</button>';
+  box.querySelector('[data-x]').onclick = () => { box.style.display = 'none'; };
+  box.querySelector('[data-s]').onclick = () => {
+    if (!items.size) { alert('還沒擷取到商品：請先往下捲動或換頁再試'); return; }
+    const s = btoa(unescape(encodeURIComponent(JSON.stringify([...items.values()].slice(0, 300)))));
+    window.open(SITE + '/#import=' + encodeURIComponent(s), '_blank');
+  };
+  document.body.appendChild(box);
+  window.__spg = box;
+}
+const bmCode = () => 'javascript:' + encodeURIComponent(`(${shopeeGrab.toString()})(${JSON.stringify(location.origin)});void 0`);
+function checkImport() {
+  const m = location.hash.match(/^#import=(.+)$/);
+  if (!m) return false;
+  history.replaceState(null, '', '#list');
+  try {
+    const list = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+    disc = normAI(list.map((x, i) => ({ ...x, rank: i + 1, reason: `蝦皮後台擷取${x.commissionRate ? `｜分潤 ${x.commissionRate}%` : ''}${x.monthlySales ? `｜銷量 ${x.monthlySales}` : ''}` })));
+    discPlat = 'reels'; discMeta = { sources: [], meta: null, src: 'shopee' };
+    return true;
+  } catch { toast('擷取資料格式錯誤，請重新擷取'); return false; }
+}
+
 /* ========== 初始化 ========== */
 $$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
 $$('select[data-opt="source"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
@@ -827,5 +899,10 @@ $('#sliders').innerHTML = USER_DIMS.map((d) => `<fieldset class="seg"><legend>${
   ${d.k === 'topic' ? '<div id="topicHint" class="hint2" aria-live="polite"></div>' : ''}</fieldset>`).join('');
 fillScoreForm();
 fillCalcForm();
-window.addEventListener('hashchange', route);
+const bm = $('#bmLink');
+bm.href = bmCode();
+bm.addEventListener('click', (e) => { e.preventDefault(); toast('請用滑鼠把這個按鈕「拖曳」到書籤列，不是點擊'); });
+const imported = checkImport();
+window.addEventListener('hashchange', () => { if (checkImport()) { route(); renderDisc(); } else route(); });
 route();
+if (imported) { renderDisc(); $('#discOut').scrollIntoView({ block: 'start' }); toast(`收到 ${disc.length} 件蝦皮商品，請勾選要加入的`); }

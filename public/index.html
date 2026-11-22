@@ -196,6 +196,18 @@
     </form>
     <div id="discOut" aria-live="polite"></div>
   </div>
+  <details class="card" id="bmCard">
+    <summary>從蝦皮分潤後台擷取（真實分潤比例）</summary>
+    <ol class="steps">
+      <li><b>電腦：</b>把右邊按鈕<b>拖曳</b>到瀏覽器的書籤列（看不到書籤列請按 <code>Ctrl + Shift + B</code>）：<a id="bmLink" class="btn pri" href="#list" draggable="true">📥 蝦皮擷取</a></li>
+      <li><b>手機：</b>按 <button type="button" data-act="copyBm">複製書籤程式碼</button>，隨便把一個網頁加入書籤，再編輯該書籤，把網址整個換成剛複製的內容、名稱改成「蝦皮擷取」。</li>
+      <li>用瀏覽器打開 <a href="https://affiliate.shopee.tw/" target="_blank" rel="noopener noreferrer">蝦皮分潤後台</a> 並<b>自己登入</b>，進到商品列表。</li>
+      <li>點書籤「蝦皮擷取」（手機在網址列輸入「蝦皮擷取」再點選書籤），右下角會出現擷取面板。</li>
+      <li><b>點完書籤後</b>再往下捲動、換頁或搜尋，面板上的件數會增加。</li>
+      <li>按面板的「送到選品網站」，會開回本網站，勾選要的商品加入。</li>
+    </ol>
+    <p class="hint">書籤只讀取你的瀏覽器本來就收到的商品資料，不會自動點擊或發送請求，也不會讀取帳號密碼。仍無法保證符合蝦皮使用條款，請自行評估。</p>
+  </details>
   <div class="filters">
     <input id="listQ" type="search" placeholder="搜尋商品名稱、分類、摘要" aria-label="搜尋商品">
     <select id="listCat" aria-label="類別"></select>
