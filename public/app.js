@@ -42,7 +42,7 @@ const autoCat = (name, cat = '') => {
   for (const [c, re] of CAT_RE) if (re.test(s)) return c;
   return '其他';
 };
-const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText'];
+const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText'];
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
@@ -381,8 +381,8 @@ function updPubBtns() { for (const [id, l] of [['pubDoneBtn', '標記已發布']
 // 產生文案視窗裡的「節慶活動」區塊：預設帶入近三週節慶，可修改或取消
 const festForm = () => `<div class="fest-box">
   <div class="checks"><label><input type="checkbox" id="festOn"${S.festOn !== false ? ' checked' : ''}>加一段節慶活動文案</label></div>
-  <label>節慶／活動資訊（選填，提供給 AI 參考）<textarea id="festText" rows="2" maxlength="500" placeholder="${festAuto() ? '' : '近三週沒有偵測到節慶，可自行輸入活動資訊（例如：店慶 12/1–12/7 全館 9 折）'}">${esc(S.festText || festAuto())}</textarea></label>
-  <p class="hint">已自動帶入未來三週的節慶與電商檔期，可直接修改（例如補上優惠內容與時間）；AI 只會使用這裡提供的活動細節，商品不適合時不會硬寫。<button type="button" class="link" data-act="festFill">重新帶入近期節慶</button></p>
+  <label>節慶／活動資訊（選填，提供給 AI 參考）<textarea id="festText" rows="2" maxlength="500" placeholder="${festAuto() ? '' : '近三週沒有偵測到節慶，可自行輸入活動資訊（例如：店慶 12/1–12/7 全館 9 折）'}">${esc(festAuto())}</textarea></label>
+  <p class="hint">已依現在時間（${fmtDT(new Date().toISOString()).slice(0, 10)}）自動帶入未來三週的節慶與電商檔期，可直接修改（例如補上優惠內容與時間）；AI 只會使用這裡提供的活動細節，商品不適合時不會硬寫。<button type="button" class="link" data-act="festFill">重新帶入近期節慶</button></p>
 </div>`;
 function renderPub() {
   for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INQ(i)) pubPicked.delete(id); }
@@ -399,6 +399,7 @@ function pubRow(i) {
     <div class="pc-top"><span>${done ? '' : `<label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>`}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
+    ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}${i.aiFest ? `｜節慶：${esc(i.aiFest.length > 30 ? i.aiFest.slice(0, 30) + '…' : i.aiFest)}` : ''}</div>` : ''}
     <div class="acts">
       ${done ? `<button type="button" data-act="unpublish" data-id="${id}">改回待發布</button>` : `<button type="button" class="pri" data-act="publish" data-id="${id}">標記已發布</button>`}
       ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
@@ -514,6 +515,7 @@ const ACT = {
       if (d.open) el.innerHTML = renderAnalyze(j, i);
       i.aiText = String(outText.analyze || '').slice(0, 8000);
       i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
+      i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : '';
       if (i.status === 'todo') setStatus(i, 'copy');
       save.i(); if (location.hash === '#pub') renderPub();
     } catch (e) { showErr(el, e); }
@@ -522,7 +524,7 @@ const ACT = {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
     const d = $('#dlg');
     const body = i.aiData ? renderAnalyze({ ...i.aiData, sources: [] }, i) : (outText.view = i.aiText, `<div class="pre">${esc(i.aiText)}</div><div class="btns"><button type="button" class="pri" data-act="copy" data-k="view">複製全部</button></div>`);
-    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>${body}`;
+    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>${i.aiAt ? `<p class="hint">產生於 ${fmtDT(i.aiAt)}${i.aiFest ? `｜節慶資訊：${esc(i.aiFest)}` : '｜未加節慶文案'}</p>` : ''}${body}`;
     d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
@@ -543,7 +545,7 @@ const ACT = {
   },
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
-  festFill() { S.festText = ''; save.s(); $('#festText').value = festAuto(); toast(festAuto() ? '已帶入近三週節慶' : '近三週沒有節慶'); },
+  festFill() { $('#festText').value = festAuto(); toast(festAuto() ? '已帶入近三週節慶' : '近三週沒有節慶'); },
   pubAll() { items.filter(INQ).forEach((i) => pubPicked.add(i.id)); renderPub(); },
   pubNone() { pubPicked.clear(); renderPub(); },
   pubDoneSel() {
@@ -614,7 +616,6 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'listQ') renderList();
-  else if (t.id === 'festText') { S.festText = t.value.trim() === festAuto() ? '' : t.value; save.s(); }
   else if (t.id === 'setCode') { S.accessCode = t.value.trim(); save.s(); }
   else if (t.id === 'setKey') { S.ownKey = t.value.trim(); save.s(); }
   else if (t.dataset.sw) { S.weights[t.dataset.sw] = clamp(num(t.value), 0, 100); save.s(); wSum(); }

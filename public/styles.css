@@ -202,6 +202,7 @@ a.btn{text-decoration:none}
 .post.fest{background:color-mix(in srgb,var(--ok) 14%,var(--card));border:1px solid color-mix(in srgb,var(--ok) 40%,var(--card))}
 .fest-box{background:color-mix(in srgb,var(--ok) 10%,var(--card));border:1px solid color-mix(in srgb,var(--ok) 35%,var(--card));border-radius:12px;padding:10px 12px;margin:10px 0}
 .fest-box label{margin-bottom:6px}.fest-box .hint{margin:4px 0 0}.fest-box .link{font-size:.875rem;margin-left:4px}
+.aiat{color:var(--mut)}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
