@@ -34,36 +34,16 @@ function scores(o) {
   return out;
 }
 
-// 台灣節慶與電商檔期（農曆節日逐年列出，其餘依規則計算）
-const LUNAR = {
-  2026: [['02-16', '除夕'], ['02-17', '春節'], ['03-03', '元宵節'], ['06-19', '端午節'], ['08-19', '七夕情人節'], ['09-25', '中秋節']],
-  2027: [['02-05', '除夕'], ['02-06', '春節'], ['02-20', '元宵節'], ['06-09', '端午節'], ['08-08', '七夕情人節'], ['09-15', '中秋節']],
-  2028: [['01-25', '除夕'], ['01-26', '春節'], ['02-09', '元宵節'], ['05-28', '端午節'], ['08-26', '七夕情人節'], ['10-03', '中秋節']],
-};
-const FIXED = [['01-01', '元旦'], ['02-14', '西洋情人節'], ['03-08', '婦女節'], ['03-14', '白色情人節'], ['04-04', '兒童節'], ['04-05', '清明節'],
-  ['06-18', '618 購物節'], ['08-08', '父親節'], ['09-09', '99 購物節'], ['10-10', '雙十節'], ['10-31', '萬聖節'], ['11-11', '雙 11 購物節'],
-  ['12-12', '雙 12 購物節'], ['12-24', '聖誕夜'], ['12-25', '聖誕節'], ['12-31', '跨年']];
-const nthWeekday = (y, m, wd, nth) => { const d = new Date(Date.UTC(y, m - 1, 1)); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (nth - 1) * 7); return d; };
-function festivals(days = 21) {
-  const now = new Date(Date.now() + 8 * 3600e3), today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  const out = [];
-  for (const y of [now.getUTCFullYear(), now.getUTCFullYear() + 1]) {
-    const list = [...FIXED, ...(LUNAR[y] || [])].map(([md, name]) => [Date.UTC(y, +md.slice(0, 2) - 1, +md.slice(3)), name]);
-    list.push([+nthWeekday(y, 5, 0, 2), '母親節']);
-    const thanks = nthWeekday(y, 11, 4, 4); list.push([+thanks + 864e5, '黑色星期五']);
-    for (const [t, name] of list) { const diff = Math.round((t - today) / 864e5); if (diff >= 0 && diff <= days) out.push({ name, date: new Date(t).toISOString().slice(5, 10).replace('-', '/'), diff }); }
-  }
-  return out.sort((a, b) => a.diff - b.diff);
-}
-
 function build(task, p, hasImage) {
   switch (task) {
     case 'analyze': {
-      const fest = festivals();
-      const festText = fest.length
-        ? `\n近三週內的節慶與檔期：${fest.map((f) => `${f.name}（${f.date}，${f.diff === 0 ? '今天' : `${f.diff} 天後`}）`).join('、')}。
-若此商品適合搭配其中某個節慶（例如送禮、應景、檔期優惠），請在 festivalPost 寫一則 60–120 字的節慶活動貼文（點出節慶與時效、帶 emoji、CTA 與「#含分潤連結」、2–3 個節慶 hashtag）；若都不適合，festivalPost 設為 null，不要硬套。`
-        : '\n近三週內沒有節慶，festivalPost 設為 null。';
+      // 節慶／活動資訊由使用者提供（前端預設帶入近三週節慶，可修改或關閉）
+      const fest = p.wantFest ? s(p.festival, 500) : '';
+      const festText = fest
+        ? `
+使用者提供的近期節慶／活動資訊：${fest}（今天：${new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)}）。
+若此商品適合搭配其中某個節慶或活動（例如送禮、應景、檔期優惠），請在 festivalPost 寫一則 60–120 字的節慶活動貼文（點出節慶與時效、帶 emoji、CTA 與「#含分潤連結」、2–3 個相關 hashtag）；活動細節只能使用上述資訊，不要自行編造優惠；若都不適合，festivalPost 設為 null，不要硬套。`
+        : '\nfestivalPost 設為 null。';
       return { json: true, text: `請分析以下候選商品是否值得在社群媒體發分潤貼文，並產出可直接使用的貼文素材。
 商品資料（使用者輸入，未經查證）：
 ${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(p.price), 總佣金率百分比: n(p.rate), 平台: plat(p.platform), 形式: s(p.format, 20), 系統總分: n(p.total), 分級: s(p.grade, 2), 構面評分1到5: scores(p.scores) })}

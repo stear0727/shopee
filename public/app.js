@@ -57,6 +57,28 @@ const DIMS = [
 const USER_DIMS = DIMS.filter((d) => !d.auto);
 const GRADE_ACT = { S: '主打，本週優先發文', A: '正式發文，穩定推薦', B: '小量測試，用不同開頭 A/B 測試', C: '不建議花時間寫文' };
 
+/* ========== 節慶與電商檔期（預設帶入發布頁的「節慶／活動資訊」，使用者可修改） ========== */
+const LUNAR = {
+  2026: [['02-16', '除夕'], ['02-17', '春節'], ['03-03', '元宵節'], ['06-19', '端午節'], ['08-19', '七夕情人節'], ['09-25', '中秋節']],
+  2027: [['02-05', '除夕'], ['02-06', '春節'], ['02-20', '元宵節'], ['06-09', '端午節'], ['08-08', '七夕情人節'], ['09-15', '中秋節']],
+  2028: [['01-25', '除夕'], ['01-26', '春節'], ['02-09', '元宵節'], ['05-28', '端午節'], ['08-26', '七夕情人節'], ['10-03', '中秋節']],
+};
+const FIXED = [['01-01', '元旦'], ['02-14', '西洋情人節'], ['03-08', '婦女節'], ['03-14', '白色情人節'], ['04-04', '兒童節'], ['04-05', '清明節'],
+  ['06-18', '618 購物節'], ['08-08', '父親節'], ['09-09', '99 購物節'], ['10-10', '雙十節'], ['10-31', '萬聖節'], ['11-11', '雙 11 購物節'],
+  ['12-12', '雙 12 購物節'], ['12-24', '聖誕夜'], ['12-25', '聖誕節'], ['12-31', '跨年']];
+const nthWeekday = (y, m, wd, nth) => { const d = new Date(Date.UTC(y, m - 1, 1)); d.setUTCDate(1 + ((wd - d.getUTCDay() + 7) % 7) + (nth - 1) * 7); return d; };
+function festivals(days = 21) {
+  const now = new Date(), today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()), out = [];
+  for (const y of [now.getFullYear(), now.getFullYear() + 1]) {
+    const list = [...FIXED, ...(LUNAR[y] || [])].map(([md, name]) => [Date.UTC(y, +md.slice(0, 2) - 1, +md.slice(3)), name]);
+    list.push([+nthWeekday(y, 5, 0, 2), '母親節']);
+    list.push([+nthWeekday(y, 11, 4, 4) + 864e5, '黑色星期五']);
+    for (const [t, name] of list) { const diff = Math.round((t - today) / 864e5); if (diff >= 0 && diff <= days) out.push({ name, date: new Date(t).toISOString().slice(5, 10).replace('-', '/'), diff }); }
+  }
+  return out.sort((a, b) => a.diff - b.diff);
+}
+const festAuto = () => festivals().map((f) => `${f.name}（${f.date}）`).join('、');
+
 /* ========== 狀態（localStorage） ========== */
 const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const _s = store.get('settings', {});
@@ -356,7 +378,14 @@ function setStatus(i, s) {
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
 function updPubBtns() { for (const [id, l] of [['pubDoneBtn', '標記已發布'], ['pubOutBtn', '移出清單']]) { const b = $('#' + id); if (b) { b.textContent = `${l}（${pubPicked.size}）`; b.disabled = !pubPicked.size; } } }
+function renderFest() {
+  const t = $('#festText'), on = $('#festOn'); if (!t) return;
+  if (document.activeElement !== t) t.value = S.festText || festAuto();
+  t.placeholder = festAuto() ? '' : '近三週沒有偵測到節慶，可自行輸入活動資訊（例如：店慶 12/1–12/7 全館 9 折）';
+  on.checked = S.festOn !== false;
+}
 function renderPub() {
+  renderFest();
   for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INQ(i)) pubPicked.delete(id); }
   const q = items.filter(INQ).sort((a, b) => String(a.queuedAt || a.createdAt).localeCompare(String(b.queuedAt || b.createdAt)));
   const d = items.filter((i) => i.status === 'done').sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
@@ -472,7 +501,7 @@ const ACT = {
     d.showModal();
     const el = $('#dlgOut'); loading(el);
     try {
-      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: i.scores, total: i.total, grade: i.grade }, b);
+      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: i.scores, total: i.total, grade: i.grade, wantFest: S.festOn !== false, festival: S.festOn !== false ? ($('#festText')?.value.trim() || festAuto()) : '' }, b);
       if (d.open) el.innerHTML = renderAnalyze(j, i);
       i.aiText = String(outText.analyze || '').slice(0, 8000);
       i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
@@ -505,6 +534,7 @@ const ACT = {
   },
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
+  festFill() { S.festText = ''; save.s(); $('#festText').value = festAuto(); toast(festAuto() ? '已帶入近三週節慶' : '近三週沒有節慶'); },
   pubAll() { items.filter(INQ).forEach((i) => pubPicked.add(i.id)); renderPub(); },
   pubNone() { pubPicked.clear(); renderPub(); },
   pubDoneSel() {
@@ -553,6 +583,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
+  else if (t.id === 'festOn') { S.festOn = t.checked; save.s(); }
   else if (t.matches('[data-ppick]')) { if (t.checked) pubPicked.add(t.dataset.ppick); else pubPicked.delete(t.dataset.ppick); updPubBtns(); }
   else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
   else if (t.matches('[data-imp]') && t.files.length) {
@@ -574,6 +605,7 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'listQ') renderList();
+  else if (t.id === 'festText') { S.festText = t.value.trim() === festAuto() ? '' : t.value; save.s(); }
   else if (t.id === 'setCode') { S.accessCode = t.value.trim(); save.s(); }
   else if (t.id === 'setKey') { S.ownKey = t.value.trim(); save.s(); }
   else if (t.dataset.sw) { S.weights[t.dataset.sw] = clamp(num(t.value), 0, 100); save.s(); wSum(); }
