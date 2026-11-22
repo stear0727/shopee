@@ -386,12 +386,11 @@ const festForm = () => `<div class="fest-box">
 </div>`;
 function renderPub() {
   for (const id of [...pubPicked]) { const i = items.find((x) => x.id === id); if (!i || !INQ(i)) pubPicked.delete(id); }
-  const q = items.filter(INQ).sort((a, b) => String(a.queuedAt || a.createdAt).localeCompare(String(b.queuedAt || b.createdAt)));
-  const d = items.filter((i) => i.status === 'done').sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
-  $('#pubQueueN').textContent = q.length; $('#pubDoneN').textContent = d.length;
-  $('#pubQueue').innerHTML = q.length ? q.map(pubRow).join('') : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
+  // 待發布與已發布放在同一個清單，標記已發布後留在原位置（依加入時間排序）
+  const all = items.filter((i) => INQ(i) || i.status === 'done').sort((a, b) => String(a.queuedAt || a.publishedAt || a.createdAt).localeCompare(String(b.queuedAt || b.publishedAt || b.createdAt)));
+  $('#pubQueueN').textContent = all.filter(INQ).length; $('#pubDoneN').textContent = all.filter((i) => i.status === 'done').length;
+  $('#pubQueue').innerHTML = all.length ? all.map(pubRow).join('') : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
   updPubBtns();
-  $('#pubDone').innerHTML = d.length ? d.map(pubRow).join('') : '<p class="empty">還沒有已發布的商品。</p>';
 }
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
