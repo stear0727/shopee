@@ -48,7 +48,7 @@
     <button type="button" data-act="autoCatAll">自動分類</button>
     <button type="button" data-act="expItems">匯出 CSV</button>
   </div>
-  <p class="hint">評分看銷量（40%）、預估社群分潤（40%）與價格（20%）；預估社群分潤＝價格 ×（匯出分潤率＋0.5%）。按「評分說明」看計算方式，分類分錯可按「編輯」修改。</p>
+  <p class="hint">評分看銷量（40%）、預估社群分潤（35%）與價格（25%），門檻依每次上傳的商品自動校正。按「評分說明」看計算方式，分類分錯可按「編輯」修改。</p>
   <div id="listBody"></div>
 </section>
 
@@ -76,6 +76,14 @@
     <div id="setWeights" class="row2"></div>
     <p id="wSum" class="hint"></p>
     <div class="btns"><button type="button" data-act="resetWeights">填入預設權重</button></div>
+    <label>預估社群分潤加成 %（預設 0.5）<input id="setBonus" type="number" min="0" max="100" step="0.1" inputmode="decimal" placeholder="0.5"></label>
+    <p class="hint">預估社群分潤＝價格 ×（分潤率＋加成）÷ 100。</p>
+  </div>
+  <div class="card">
+    <h2>評分門檻</h2>
+    <p class="hint">每次上傳蝦皮檔案時，依該批商品的百分位數自動重算；一批少於 30 筆時沿用上一次的門檻。</p>
+    <div id="thrInfo"></div>
+    <div class="btns"><button type="button" data-act="recalAll">用目前全部商品重算</button><button type="button" class="ghost" data-act="resetThr">恢復預設門檻</button></div>
   </div>
   <div class="card">
     <h2>存取（選填）</h2>

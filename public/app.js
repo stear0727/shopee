@@ -46,16 +46,34 @@ const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'disc
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
-// 評分看銷量、預估社群分潤、價格（皆由商品資料自動計算）
+// 評分：銷量、預估社群分潤、價格；門檻依每次上傳的商品批次自動校正（百分位數）
 const DIMS = [
-  { k: 'sales', n: '銷量', s: '銷量', w: 40, auto: 1, rule: '≥5 萬→5、≥1 萬→4、≥2,000→3、≥500→2、其他→1' },
-  { k: 'comm', n: '預估社群分潤', s: '分潤', w: 40, auto: 1, rule: '價格 ×（分潤率＋0.5%）：≥150 元→5、≥80→4、≥40→3、≥15→2、其他→1' },
-  { k: 'price', n: '價格帶衝動度', s: '價格', w: 20, auto: 1, rule: '≤299→5、≤599→4、≤999→3、≤1,999→2、其他→1' },
+  { k: 'sales', n: '銷量', s: '銷量', w: 40, auto: 1, up: 1 },
+  { k: 'comm', n: '預估社群分潤', s: '分潤', w: 35, auto: 1, up: 1 },
+  { k: 'price', n: '價格', s: '價格', w: 25, auto: 1, up: 0 },
 ];
-// 社群媒體推廣：預估分潤金額 = 商品價格 ×（匯出分潤率 ＋ 0.5%）
-const SOCIAL_BONUS = 0.5;
-const commOf = (p) => num(p.price) * (num(p.base) + num(p.xtra) + SOCIAL_BONUS) / 100;
-const commScore = (v) => (v >= 150 ? 5 : v >= 80 ? 4 : v >= 40 ? 3 : v >= 15 ? 2 : 1);
+// 門檻 [P25, P50, P75, P90]；尚未校正前使用 100 筆樣本驗證得到的預設值
+const DEF_THR = { sales: [10000, 20000, 60000, 100000], comm: [1.6, 4.7, 12, 39], price: [95, 170, 300, 690] };
+const MIN_BATCH = 30, CAP_TOTAL = 64;
+const bonus = () => (Number.isFinite(Number(S.bonus)) ? Number(S.bonus) : 0.5);
+// 預估社群分潤 = 價格 ×（分潤率 + 加成）÷ 100，加成預設 0.5（可在設定修改）
+const commOf = (p) => num(p.price) * (num(p.base) + num(p.xtra) + bonus()) / 100;
+const thr = () => S.thr || DEF_THR;
+const sig2 = (x) => (x ? Number(Number(x).toPrecision(2)) : 0);
+const pct = (arr, p) => { const a = [...arr].sort((x, y) => x - y); if (!a.length) return 0; const k = (a.length - 1) * p, f = Math.floor(k), c = Math.ceil(k); return a[f] + (a[c] - a[f]) * (k - f); };
+const upScore = (v, t) => (v >= t[3] ? 5 : v >= t[2] ? 4 : v >= t[1] ? 3 : v >= t[0] ? 2 : 1);   // 越高越好
+const downScore = (v, t) => (v <= t[0] ? 5 : v <= t[1] ? 4 : v <= t[2] ? 3 : v <= t[3] ? 2 : 1); // 越低越好（價格）
+// 依一批商品重算門檻；少於 30 筆時沿用上一次門檻
+function calibrate(list) {
+  if (list.length < MIN_BATCH) return { ok: false, n: list.length };
+  const col = (k) => [0.25, 0.5, 0.75, 0.9].map((p) => sig2(pct(list.map((x) => num(x[k])), p)));
+  S.thr = { sales: col('sales'), comm: col('comm'), price: col('price'), n: list.length, at: new Date().toISOString() };
+  save.s();
+  return { ok: true, n: list.length };
+}
+const fmtThr = (k, t = thr()[k]) => (k === 'price'
+  ? `≤${fmt(t[0])}→5、≤${fmt(t[1])}→4、≤${fmt(t[2])}→3、≤${fmt(t[3])}→2、其他→1`
+  : `≥${fmt(t[3], k === 'comm' ? 1 : 0)}→5、≥${fmt(t[2], k === 'comm' ? 1 : 0)}→4、≥${fmt(t[1], k === 'comm' ? 1 : 0)}→3、≥${fmt(t[0], k === 'comm' ? 1 : 0)}→2、其他→1`);
 const USER_DIMS = DIMS.filter((d) => !d.auto);
 const GRADE_ACT = { S: '主打，本週優先發文', A: '正式發文，穩定推薦', B: '小量測試，用不同開頭 A/B 測試', C: '不建議花時間寫文' };
 
@@ -84,22 +102,25 @@ const festAuto = () => festivals().map((f) => `${f.name}（${f.date}）`).join('
 /* ========== 狀態（localStorage） ========== */
 const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const _s = store.get('settings', {});
-const S = { accessCode: '', ownKey: '', ..._s, weights: _s.weights && 'comm' in _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
+const S = { accessCode: '', ownKey: '', ..._s, wv: 3, weights: _s.wv === 3 && _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
 let items = store.get('items', []);
 const save = { s: () => store.set('settings', S), i: () => store.set('items', items) };
 
 /* ========== 確定性公式 ========== */
-const salesScore = (v) => (v >= 50000 ? 5 : v >= 10000 ? 4 : v >= 2000 ? 3 : v >= 500 ? 2 : 1);
 const priceScore = (p) => (p <= 299 ? 5 : p <= 599 ? 4 : p <= 999 ? 3 : p <= 1999 ? 2 : 1);
 const rateScore = (r) => (r >= 10 ? 5 : r >= 7 ? 4 : r >= 5 ? 3 : r >= 3 ? 2 : 1);
 const gradeOf = (t) => (t >= 80 ? 'S' : t >= 65 ? 'A' : t >= 50 ? 'B' : 'C');
 function scoreOf(p) {
-  const v = { sales: salesScore(num(p.sales)), comm: commScore(commOf(p)), price: priceScore(num(p.price)) };
-  let sw = 0, t = 0;
-  for (const d of DIMS) { const w = Math.max(0, num(S.weights[d.k])); sw += w; t += w * (clamp(num(v[d.k]) || 3, 1, 5) - 1) / 4; }
-  const total = sw ? Math.round((t / sw) * 1000) / 10 : 0;
-  return { v, total, grade: gradeOf(total) };
+  const t = thr(), price = num(p.price);
+  const v = { sales: upScore(num(p.sales), t.sales), comm: upScore(commOf(p), t.comm), price: price > 0 ? downScore(price, t.price) : 1 };
+  let sw = 0, tt = 0;
+  for (const d of DIMS) { const w = Math.max(0, num(S.weights[d.k])); sw += w; tt += w * (v[d.k] - 1) / 4; }
+  let total = sw ? Math.round((tt / sw) * 1000) / 10 : 0;
+  // 上限：銷量或預估社群分潤任一項只得 1 分，總分最高 64
+  const capped = (v.sales === 1 || v.comm === 1) && total > CAP_TOTAL;
+  if (capped) total = CAP_TOTAL;
+  return { v, total, grade: gradeOf(total), capped };
 }
 const norm = (s) => String(s || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 function keyOf(name) { let k = norm(name), g = 0; while (S.alias[k] && g++ < 20) k = S.alias[k]; return k; }
@@ -248,13 +269,14 @@ async function readTable(file) {
 const isShopeeFile = (rows) => rows.length && '商品名稱' in rows[0] && ('推廣連結' in rows[0] || '商品連結' in rows[0]);
 const salesNum = (v) => { const m = String(v || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)\s*(萬|k|K)?/); return m ? Math.round(Number(m[1]) * (m[2] === '萬' ? 1e4 : m[2] ? 1e3 : 1)) : ''; };
 function importShopee(rows) {
-  let added = 0, updated = 0;
+  let added = 0, updated = 0; const vals = [];
   for (const r of rows) {
     const name = String(r['商品名稱'] || '').trim(); if (!name) continue;
     const link = safeUrl(r['商品連結']), m = link.match(/product\/(\d+)\/(\d+)/), pid = String(r['商品編號'] || '').trim() || (m && m[2]);
     const id = m ? `sp_${m[1]}_${m[2]}` : pid ? `sp_0_${pid}` : '';
-    const price = num(String(r['商品價格'] || '').replace(/[$,]/g, '')), sales = salesNum(r['銷售量']);
+    const price = num(String(r['商品價格'] || '').replace(/[$,s]/g, '')), sales = salesNum(r['銷售量']);
     const shop = String(r['商店名稱'] || '').trim().slice(0, 80), aff = safeUrl(r['推廣連結']), rate = num(String(r['分潤率'] || '').replace('%', ''));
+    vals.push({ price, sales: num(sales), comm: commOf({ price, base: rate }) });
     const old = items.find((i) => (id && i.id === id) || (pid && (String(i.url).match(/(\d+)$/) || [])[1] === pid) || keyOf(i.name) === keyOf(name));
     if (old) {
       Object.assign(old, { price: price || old.price, sales: sales || old.sales, shop: shop || old.shop, aff: aff || old.aff, url: link || old.url, base: rate || old.base });
@@ -265,7 +287,7 @@ function importShopee(rows) {
     it.status = 'watch'; items.push(it); added++;
   }
   save.i();
-  return { added, updated };
+  return { added, updated, vals };
 }
 function download(name, text) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
@@ -442,8 +464,8 @@ function cardItem(i, idx) {
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : '<span class="muted">價格未知</span>'}${num(i.discount) ? `<span class="disc">-${fmt(num(i.discount))}%</span>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
     ${stars || trend ? `<div class="pc-row"><span>${stars}</span>${trend}</div>` : ''}
     ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
-    <div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${SOCIAL_BONUS}%</span></div>
-    <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
+    <div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${bonus()}%</span></div>
+    <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span>${scoreOf(i).capped ? ' <span class="tag" title="銷量或預估社群分潤只得 1 分，總分上限 64">上限</span>' : ''}</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
     ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觸及／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
     <div class="acts"><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
@@ -489,6 +511,9 @@ async function checkConn() {
 function renderSettings() {
   $('#setCode').value = S.accessCode; $('#setKey').value = S.ownKey;
   $('#setWeights').innerHTML = DIMS.map((d) => `<label>${esc(d.n)}${d.auto ? '（自動）' : ''}<input type="number" min="0" max="100" inputmode="numeric" data-sw="${d.k}" value="${esc(S.weights[d.k])}"></label>`).join('');
+  $('#setBonus').value = bonus();
+  const T = thr();
+  $('#thrInfo').innerHTML = `<p class="hint">${S.thr ? `依 ${fmtDT(S.thr.at)} 的 ${S.thr.n} 筆商品計算` : '尚未校正，使用預設門檻'}</p><ul class="sm"><li>銷量：${fmtThr('sales', T.sales)}</li><li>預估社群分潤：${fmtThr('comm', T.comm)}</li><li>價格：${fmtThr('price', T.price)}</li></ul>`;
   wSum(); checkConn();
 }
 function wSum() {
@@ -580,16 +605,28 @@ const ACT = {
     list.forEach((i) => setStatus(i, 'watch')); pubPicked.clear(); save.i(); renderPub();
   },
   scoreHelp() {
-    const sw = DIMS.reduce((t, d) => t + num(S.weights[d.k]), 0) || 1;
+    const sw = DIMS.reduce((t, d) => t + num(S.weights[d.k]), 0) || 1, T = thr();
     const d = $('#dlg');
     d.innerHTML = `<div class="dlg-head"><h2>評分說明</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
-      <h3>評分（0–100）</h3><p>看<b>銷量</b>、<b>預估社群分潤</b>與<b>價格</b>，都由商品資料自動計算，各換成 1–5 分後依權重加權成 0–100 分（公式：<code>Σ 權重 ×（得分 − 1）÷ 4 ÷ 權重合計</code>）。權重可到「設定」調整；用「編輯」修改銷量、價格或分潤率，分數會跟著更新。</p>
-      <div class="tw"><table><thead><tr><th>項目</th><th>權重</th><th>計分（1–5 分）</th></tr></thead><tbody>${DIMS.map((x) => `<tr><td>${esc(x.n)}</td><td>${fmt(num(S.weights[x.k]) / sw * 100, 0)}%</td><td>${esc(x.rule)}</td></tr>`).join('')}</tbody></table></div>
-      <p class="hint">預估社群分潤＝商品價格 ×（匯出分潤率＋${SOCIAL_BONUS}%），社群媒體推廣比匯出的分潤率多 ${SOCIAL_BONUS}%。例：999 元 ×（18.5%＋0.5%）＝ 189.8 元。</p>
-      <h3>分級</h3><ul><li><b>S</b>：80 分以上，優先發文</li><li><b>A</b>：65–79 分，穩定推薦</li><li><b>B</b>：50–64 分，小量測試</li><li><b>C</b>：未滿 50 分，不建議</li></ul>
-      <h3>分類</h3><p>依商品名稱關鍵字自動判斷（例如「面膜」→美妝保養、「行動電源」→3C 配件），分錯可在卡片按「編輯」修改。</p>`;
+      <h3>1. 解析資料</h3><ul><li>價格：去除逗號轉數字。</li><li>銷量：取區間下限，「3,000+」為 3,000、「4 萬+」為 40,000。</li><li>分潤率：去除 % 轉數字。</li><li>預估社群分潤＝價格 ×（分潤率＋${bonus()}）÷ 100（加成 ${bonus()}% 可在設定修改）。</li></ul>
+      <h3>2. 門檻（每次上傳自動校正）</h3><p>三項各自取該批商品的百分位數為切點（取兩位有效數字）。銷量與預估社群分潤：≥P90→5、≥P75→4、≥P50→3、≥P25→2、其他→1；價格越低越高分：≤P25→5、≤P50→4、≤P75→3、≤P90→2、其他→1。一批少於 ${MIN_BATCH} 筆時沿用上一次的門檻。</p>
+      <div class="tw"><table><thead><tr><th>項目</th><th>權重</th><th>5 分</th><th>4 分</th><th>3 分</th><th>2 分</th></tr></thead><tbody>
+        <tr><td>銷量</td><td>${fmt(num(S.weights.sales) / sw * 100)}%</td><td>≥${fmt(T.sales[3])}</td><td>≥${fmt(T.sales[2])}</td><td>≥${fmt(T.sales[1])}</td><td>≥${fmt(T.sales[0])}</td></tr>
+        <tr><td>預估社群分潤（元）</td><td>${fmt(num(S.weights.comm) / sw * 100)}%</td><td>≥${fmt(T.comm[3], 1)}</td><td>≥${fmt(T.comm[2], 1)}</td><td>≥${fmt(T.comm[1], 1)}</td><td>≥${fmt(T.comm[0], 1)}</td></tr>
+        <tr><td>價格（元）</td><td>${fmt(num(S.weights.price) / sw * 100)}%</td><td>≤${fmt(T.price[0])}</td><td>≤${fmt(T.price[1])}</td><td>≤${fmt(T.price[2])}</td><td>≤${fmt(T.price[3])}</td></tr>
+      </tbody></table></div>
+      <p class="hint">${S.thr ? `目前門檻依 ${fmtDT(S.thr.at)} 上傳的 ${S.thr.n} 筆商品計算。` : '尚未校正，使用預設門檻（100 筆樣本驗證值）。'}</p>
+      <h3>3. 總分與上限</h3><p>總分＝Σ（權重 ×（得分 − 1）÷ 4）÷ 權重合計 × 100。銷量或預估社群分潤任一項只得 1 分時，總分最高 ${CAP_TOTAL} 分（卡片標示「上限」）。</p>
+      <h3>4. 等級</h3><ul><li><b>S</b>：80 分以上</li><li><b>A</b>：65–79 分</li><li><b>B</b>：50–64 分</li><li><b>C</b>：未滿 50 分</li></ul>
+      <h3>分類</h3><p>依商品名稱關鍵字自動判斷，分錯可在卡片按「編輯」修改。</p>`;
     d.showModal();
   },
+  recalAll() {
+    const c = calibrate(items.map((i) => ({ price: num(i.price), sales: num(i.sales), comm: commOf(i) })));
+    if (!c.ok) { toast(`目前只有 ${c.n} 件商品，少於 ${MIN_BATCH} 件，無法重算門檻`); return; }
+    items.forEach(rescore); save.i(); renderSettings(); toast(`已用全部 ${c.n} 件商品重算門檻`);
+  },
+  resetThr() { delete S.thr; save.s(); items.forEach(rescore); save.i(); renderSettings(); toast('已恢復預設門檻'); },
   publish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'done'); save.i(); route(); toast(`已標記發布：${fmtDT(i.publishedAt)}`); },
   unpublish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, i.aiText ? 'copy' : 'todo'); save.i(); route(); },
   unqueue(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'watch'); save.i(); route(); },
@@ -604,6 +641,7 @@ const ACT = {
     const w = Object.fromEntries($$('[data-sw]').map((e) => [e.dataset.sw, clamp(num(e.value), 0, 100)]));
     if (!Object.values(w).some((x) => x > 0)) { toast('權重合計不能為 0'); return; }
     S.weights = w; S.accessCode = $('#setCode').value.trim(); S.ownKey = $('#setKey').value.trim();
+    const bv = $('#setBonus').value.trim(); S.bonus = bv === '' ? 0.5 : clamp(num(bv), 0, 100);
     save.s(); items.forEach(rescore); save.i();
     $('#saveMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），商品分數已重新計算`;
     checkConn();
@@ -627,16 +665,22 @@ document.addEventListener('change', async (e) => {
   else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
   else if (t.matches('[data-imp]') && t.files.length) {
     // 可一次選多個檔案，逐一匯入後彙總結果
-    let added = 0, updated = 0, other = 0;
+    let added = 0, updated = 0, other = 0; const batch = [];
     const bad = [];
     for (const file of t.files) {
       try {
         const rows = await readTable(file);
-        if (isShopeeFile(rows)) { const r = importShopee(rows); added += r.added; updated += r.updated; }
+        if (isShopeeFile(rows)) { const r = importShopee(rows); added += r.added; updated += r.updated; batch.push(...r.vals); }
         else other += importItems(rows);
       } catch (err) { bad.push(`${file.name}（${err?.message || '讀取失敗'}）`); }
     }
-    toast(`${t.files.length} 個檔案：新增 ${added} 件、更新 ${updated} 件${other ? `、備份匯入 ${other} 筆` : ''}${bad.length ? `；失敗：${bad.join('、')}` : ''}`);
+    let cal = '';
+    if (batch.length) {
+      const c = calibrate(batch);
+      cal = c.ok ? `；已依本批 ${c.n} 筆重算評分門檻` : `；本批僅 ${c.n} 筆（少於 ${MIN_BATCH} 筆，樣本不足），沿用上一次的評分門檻`;
+      items.forEach(rescore); save.i();
+    }
+    toast(`${t.files.length} 個檔案：新增 ${added} 件、更新 ${updated} 件${other ? `、備份匯入 ${other} 筆` : ''}${cal}${bad.length ? `；失敗：${bad.join('、')}` : ''}`);
     t.value = '';
     if (location.hash !== '#list') location.hash = '#list'; else route();
   } else if (t.id === 'listSort') renderList();
