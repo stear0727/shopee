@@ -158,6 +158,9 @@ th{color:var(--mut);font-weight:600;font-size:.8125rem;white-space:nowrap}
 }
 @media (max-width:420px){.row3{grid-template-columns:1fr 1fr}}
 
+.cta{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border-color:var(--acc);background:var(--accbg)}
+.cta h2,.cta p{margin:0}
+a.btn{text-decoration:none}
 /* 商品卡片 */
 .filters{display:grid;gap:8px;grid-template-columns:1fr 1fr 1fr;margin-bottom:10px}
 .filters input{grid-column:1/-1}
