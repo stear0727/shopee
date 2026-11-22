@@ -395,6 +395,16 @@ function renderAnalyze(j, p) {
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
   return outCard('analyze', h, j, t);
 }
+// 把 AI 文案結果存到商品上（單件與批次共用），回傳顯示用的 HTML
+const copyReq = (i, want, fest) => ({ name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest });
+function applyCopy(i, j, want, fest) {
+  const html = renderAnalyze(j, i);
+  i.aiText = String(outText.analyze || '').slice(0, 8000);
+  i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
+  i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : '';
+  if (i.status === 'todo') setStatus(i, 'copy');
+  return html;
+}
 /* ========== M7 候選清單 ========== */
 let recMap = {};
 function calcRec() { recMap = Object.fromEntries(items.map((i) => [i.id, i.total])); }
@@ -412,6 +422,7 @@ const picked = new Set(), pubPicked = new Set();
 const INQ = (i) => i.status === 'todo' || i.status === 'copy';   // 待發文、已產文案＝在發布清單中（未發布）
 const INPUB = (i) => INQ(i) || i.status === 'done';               // 發布清單中的全部商品（含已發布）
 const pad2 = (n) => String(n).padStart(2, '0');
+let batchRunning = false, batchStop = false;   // 批次產生文案進行中／要求停止
 const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 // 改狀態時一併處理發布時間：改成「已發布」自動記錄現在時間，改離「已發布」則清除
 function setStatus(i, s) {
@@ -426,7 +437,7 @@ const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
 function updPubBtns() {
   const sel = items.filter((i) => pubPicked.has(i.id)), nd = sel.filter(INQ).length, dn = sel.filter((i) => i.status === 'done').length;
-  for (const [id, l, c] of [['pubDoneBtn', '標記已發布', nd], ['pubUndoBtn', '取消已發布', dn], ['pubOutBtn', '移出清單', sel.length]]) { const b = document.getElementById(id); if (b) { b.textContent = l + '（' + c + '）'; b.disabled = !c; } }
+  for (const [id, l, c] of [['pubGenBtn', '批次產生文案', batchRunning ? 0 : nd], ['pubDoneBtn', '標記已發布', nd], ['pubUndoBtn', '取消已發布', dn], ['pubOutBtn', '移出清單', sel.length]]) { const b = document.getElementById(id); if (b) { b.textContent = l + '（' + c + '）'; b.disabled = !c; } }
 }
 // 產生文案視窗裡的「節慶活動」區塊：預設帶入近三週節慶，可修改或取消
 const festForm = () => `<div class="fest-box">
@@ -707,13 +718,10 @@ const ACT = {
     const d = $('#dlg'), want = $('#festOn').checked, fest = want ? ($('#festText').value.trim() || festAuto()) : '';
     const el = $('#dlgOut'); loading(el);
     try {
-      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest }, b);
+      const j = await ai('analyze', copyReq(i, want, fest), b);
       b.textContent = '重新產生';
-      if (d.open) el.innerHTML = renderAnalyze(j, i);
-      i.aiText = String(outText.analyze || '').slice(0, 8000);
-      i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
-      i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : '';
-      if (i.status === 'todo') setStatus(i, 'copy');
+      const html = applyCopy(i, j, want, fest);
+      if (d.open) el.innerHTML = html;
       save.i(); softRefresh();   // 對話框開著時會等關閉後再重繪目前畫面（發布清單）
     } catch (e) { showErr(el, e); }
   },
@@ -725,6 +733,47 @@ const ACT = {
     if (!d.open) d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
+  // 批次產生文案：先設定節慶段落（全部共用），再逐件呼叫 AI
+  pubGenSel() {
+    if (batchRunning) { toast('批次產生中，請稍候'); return; }
+    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
+    const has = list.filter((i) => i.aiText).length, d = $('#dlg');
+    d.innerHTML = `<div class="dlg-head"><h2>批次產生文案（${list.length} 件）</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+      <p class="hint">會一件一件請 AI 產生文案，每件約 10–20 秒。產生中可以關閉這個視窗，完成後會通知你。</p>
+      ${has ? `<div class="checks"><label><input type="checkbox" id="batchRedo">已有文案的 ${has} 件也重新產生（不勾＝跳過）</label></div>` : ''}
+      ${festForm()}
+      <div class="btns"><button type="button" class="pri" data-act="batchGo">開始產生</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
+      <div id="batchOut"></div>`;
+    if (!d.open) d.showModal();
+  },
+  async batchGo(b) {
+    if (batchRunning) return;
+    const redo = $('#batchRedo')?.checked, want = $('#festOn').checked, fest = want ? ($('#festText').value.trim() || festAuto()) : '';
+    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i) && (redo || !i.aiText));
+    if (!list.length) { toast('選取的商品都已有文案'); return; }
+    batchRunning = true; batchStop = false; b.disabled = true; updPubBtns();
+    const st = Object.fromEntries(list.map((i) => [i.id, '等待中']));
+    const draw = () => { const el = $('#batchOut'); if (!el) return; const ok = Object.values(st).filter((v) => v === '✓ 完成').length;
+      el.innerHTML = `<p><b>進度 ${ok}／${list.length}</b>${batchRunning ? ' <button type="button" class="ghost" data-act="batchStopNow">停止</button>' : ''}</p><ol class="batch-list">${list.map((i) => `<li><span>${esc(i.name.slice(0, 40))}</span><span class="${st[i.id].startsWith('✓') ? 'pubok' : st[i.id].startsWith('✕') ? 'danger' : 'muted'}">${esc(st[i.id])}</span></li>`).join('')}</ol>`; };
+    let ok = 0, fail = 0, stopMsg = '';
+    for (const i of list) {
+      if (batchStop) { stopMsg = '已停止'; break; }
+      st[i.id] = '產生中…'; draw();
+      try {
+        const j = await ai('analyze', copyReq(i, want, fest));
+        applyCopy(i, j, want, fest); save.i(); st[i.id] = '✓ 完成'; ok++;
+      } catch (e) {
+        st[i.id] = `✕ ${e.message || '失敗'}`; fail++;
+        if (e.status === 429 || e.status === 401) { stopMsg = e.status === 429 ? 'Gemini 額度用完或請求太頻繁，已暫停，請稍後再試' : e.message; break; }
+      }
+      draw();
+    }
+    list.forEach((i) => { if (st[i.id] === '等待中') st[i.id] = '未產生'; });
+    batchRunning = false; draw(); updPubBtns();
+    toast(`批次產生完成：成功 ${ok} 件${fail ? `、失敗 ${fail} 件` : ''}${stopMsg ? `（${stopMsg}）` : ''}`);
+    softRefresh();
+  },
+  batchStopNow(b) { batchStop = true; b.disabled = true; b.textContent = '停止中…（等目前這件完成）'; },
   // 發布時間
   schedOpen(b) { const i = items.find((x) => x.id === b.dataset.id); if (i) schedDlg(i); },
   schedSave(b) {

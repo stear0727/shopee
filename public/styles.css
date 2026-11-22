@@ -265,4 +265,5 @@ tr.muted td{color:var(--mut)}
 .ptime b{font-size:.8125rem;flex-basis:100%}
 .ptime.set{border-left-color:var(--acc)}.ptime.set b{color:var(--acc)}.ptime.set span{font-weight:700}
 .ptime .link{font-size:.8125rem;min-height:32px}.ptime em.od{color:var(--bad);font-style:normal;font-weight:600}
+.batch-list{margin:8px 0 0;padding-left:1.4em;font-size:.875rem}.batch-list li{padding:4px 0;border-bottom:1px solid var(--line)}.batch-list li span:last-child{display:block;font-size:.8125rem}
 [hidden]{display:none!important}
