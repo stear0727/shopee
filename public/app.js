@@ -42,7 +42,7 @@ const autoCat = (name, cat = '') => {
   for (const [c, re] of CAT_RE) if (re.test(s)) return c;
   return '其他';
 };
-const EXTRA = ['shop', 'aff', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText'];
+const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText'];
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
@@ -286,8 +286,8 @@ function importItems(rows) {
   save.i(); return n;
 }
 /* ========== 路由 ========== */
-const VIEWS = ['list', 'score', 'ai', 'settings'];
-const RENDER = { score: renderScoreOut, ai: renderAI, list: renderList, settings: renderSettings };
+const VIEWS = ['list', 'pub', 'score', 'ai', 'settings'];
+const RENDER = { score: renderScoreOut, ai: renderAI, list: renderList, pub: renderPub, settings: renderSettings };
 function route() {
   let v = location.hash.slice(1); if (!VIEWS.includes(v)) v = 'list';
   $$('.view').forEach((s) => { s.hidden = s.id !== 'v-' + v; });
@@ -390,6 +390,44 @@ const SORT_FN = {
   priceAsc: (a, b) => num(a.price) - num(b.price),
   new: (a, b) => String(b.createdAt).localeCompare(String(a.createdAt)),
 };
+/* ========== 發布清單 ========== */
+const picked = new Set();
+const INQ = (i) => i.status === 'todo' || i.status === 'copy';   // 待發文、已產文案＝在發布清單中
+const pad2 = (n) => String(n).padStart(2, '0');
+const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+// 改狀態時一併處理發布時間：改成「已發布」自動記錄現在時間，改離「已發布」則清除
+function setStatus(i, s) {
+  if (!STATUS[s]) return;
+  if (s === 'done' && i.status !== 'done') i.publishedAt = new Date().toISOString();
+  if (s !== 'done') i.publishedAt = '';
+  if ((s === 'todo' || s === 'copy') && !i.queuedAt) i.queuedAt = new Date().toISOString();
+  if (s === 'watch' || s === 'drop') i.queuedAt = '';
+  i.status = s;
+}
+const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
+function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
+function renderPub() {
+  const q = items.filter(INQ).sort((a, b) => String(a.queuedAt || a.createdAt).localeCompare(String(b.queuedAt || b.createdAt)));
+  const d = items.filter((i) => i.status === 'done').sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')));
+  $('#pubQueueN').textContent = q.length; $('#pubDoneN').textContent = d.length;
+  $('#pubQueue').innerHTML = q.length ? q.map(pubRow).join('') : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
+  $('#pubDone').innerHTML = d.length ? d.map(pubRow).join('') : '<p class="empty">還沒有已發布的商品。</p>';
+}
+function pubRow(i) {
+  const id = esc(i.id), done = i.status === 'done';
+  return `<article class="pc pub${done ? ' isdone' : ''}">
+    <div class="pc-top"><span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span><span class="muted sm">${esc(i.shop || '')}</span></div>
+    <h3>${esc(i.name)}</h3>
+    <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
+    <div class="acts">
+      ${done ? `<button type="button" data-act="unpublish" data-id="${id}">改回待發布</button>` : `<button type="button" class="pri" data-act="publish" data-id="${id}">標記已發布</button>`}
+      ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
+      ${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">${i.aiText ? '重新產文案' : '產生文案'}</button>
+      ${done ? '' : `<button type="button" class="ghost" data-act="unqueue" data-id="${id}">移出清單</button>`}
+    </div>
+  </article>`;
+}
+
 let catSel = 'all';
 function renderList() {
   // 類別按鈕：點選即顯示該類別排行（件數依類別多寡排序，「其他」放最後）
@@ -405,15 +443,17 @@ function renderList() {
   const arr = items.filter((i) => (f === 'all' || i.status === f) && (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)))
     .sort(SORT_FN[$('#listSort').value] || SORT_FN.rec);
   $('#listCount').textContent = `${c === 'all' ? '綜合排行' : `${c} 排行`}｜${arr.length} 件`;
+  updPickBtn();
   if (!arr.length) { $('#listBody').innerHTML = `<p class="empty">${items.length ? '沒有符合條件的商品。' : '還沒有商品。請在上方匯入蝦皮匯出的商品檔。'}</p>`; return; }
   $('#listBody').innerHTML = `<div class="cards">${arr.map(cardItem).join('')}</div>`;
+  updPickBtn();
 }
 function cardItem(i, idx) {
   const r = num(i.rating), a = i.actual || {}, u = safeUrl(i.url), id = esc(i.id);
   const stars = r ? `<span class="stars" aria-hidden="true">${'★'.repeat(Math.round(r))}${'☆'.repeat(5 - Math.round(r))}</span> <span aria-label="評分 ${r}">${r}</span>` : '';
   const trend = i.trend === '上升' ? '<span class="up">↗ 上升</span>' : i.trend === '下降' ? '<span class="down">↘ 下降</span>' : i.trend ? `<span class="muted">→ ${esc(i.trend)}</span>` : '';
   return `<article class="pc">
-    <div class="pc-top"><span><span class="rk${idx < 3 ? ' top' : ''}">#${idx + 1}</span> <span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
+    <div class="pc-top"><span><label class="pick" title="選取以加入發布清單"><input type="checkbox" data-pick="${id}"${picked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label><span class="rk${idx < 3 ? ' top' : ''}">#${idx + 1}</span> <span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : '<span class="muted">價格未知</span>'}${num(i.discount) ? `<span class="disc">-${fmt(num(i.discount))}%</span>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
     ${stars || trend ? `<div class="pc-row"><span>${stars}</span>${trend}</div>` : ''}
@@ -421,8 +461,9 @@ function cardItem(i, idx) {
     <div class="pc-row sm"><span>推薦指數 <b>${recMap[i.id] ?? '—'}</b>｜<span class="grade g${i.grade}">${i.grade}</span> ${fmt(i.total, 1)} 分</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
     ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觸及／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
+    ${i.status === 'done' && i.publishedAt ? `<div class="sm pubok">✓ 已發布｜${fmtDT(i.publishedAt)}</div>` : INQ(i) ? '<div class="sm"><span class="tag hot">在發布清單</span></div>' : ''}
     <select data-act="status" data-id="${id}" aria-label="${esc(i.name)} 狀態">${opts(STATUS, i.status)}</select>
-    <div class="acts">${safeUrl(i.aff) ? `<button type="button" class="pri" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">AI 產文案</button>${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemToScore" data-id="${id}">評分</button><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
+    <div class="acts">${INQ(i) || i.status === 'done' ? '' : `<button type="button" data-act="queueOne" data-id="${id}">加入發布</button>`}${safeUrl(i.aff) ? `<button type="button" class="pri" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">AI 產文案</button>${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemToScore" data-id="${id}">評分</button><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
   </article>`;
 }
 function editItem(id) {
@@ -447,7 +488,7 @@ function editItem(id) {
   d.onclose = () => {
     if (d.returnValue !== 'ok') return;
     const f = new FormData($('#fEdit'));
-    i.status = STATUS[f.get('status')] ? f.get('status') : i.status;
+    setStatus(i, f.get('status'));
     i.note = String(f.get('note')).slice(0, 500); i.category = String(f.get('category')).trim().slice(0, 40); i.url = safeUrl(f.get('url'));
     i.price = num(f.get('price')); i.shop = String(f.get('shop')).trim().slice(0, 80); i.aff = safeUrl(f.get('aff'));
     for (const k of ['discount', 'rating', 'sales']) i[k] = numOr(f.get(k));
@@ -495,7 +536,7 @@ const ACT = {
       const j = await ai('analyze', { name: p.name, category: p.category, price: num(p.price), platform: p.platform, format: p.format, scores: p.scores, total: p.total, grade: p.grade }, b);
       el.innerHTML = renderAnalyze(j, p);
       const it = items.find((x) => x.id === aiSrc);
-      if (it) { it.aiText = String(outText.analyze || '').slice(0, 8000); if (['watch', 'todo'].includes(it.status)) it.status = 'copy'; save.i(); }
+      if (it) { it.aiText = String(outText.analyze || '').slice(0, 8000); if (it.status === 'todo') setStatus(it, 'copy'); save.i(); }
     } catch (e) { showErr(el, e); }
   },
   itemAI(b) { aiSrc = b.dataset.id; location.hash = '#ai'; renderAI(); ACT.runAnalyze($('#v-ai [data-act="runAnalyze"]')); },
@@ -515,6 +556,16 @@ const ACT = {
     save.i(); renderList(); toast(n ? `已自動分類 ${n} 件商品` : '所有商品都已有分類');
   },
   catSel(b) { catSel = b.dataset.c; renderList(); },
+  queueOne(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; queue(i); save.i(); renderList(); toast('已加入發布清單'); },
+  pickAdd() {
+    let n = 0;
+    for (const id of picked) { const i = items.find((x) => x.id === id); if (i && !INQ(i) && i.status !== 'done') { queue(i); n++; } }
+    picked.clear(); save.i(); renderList(); toast(n ? `已加入發布清單 ${n} 件` : '選取的商品已在清單或已發布');
+  },
+  pickNone() { picked.clear(); renderList(); },
+  publish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'done'); save.i(); route(); toast(`已標記發布：${fmtDT(i.publishedAt)}`); },
+  unpublish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, i.aiText ? 'copy' : 'todo'); save.i(); route(); },
+  unqueue(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'watch'); save.i(); route(); },
   editItem(b) { editItem(b.dataset.id); },
   itemToScore(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; draft = { ...blankDraft(), ...i, scores: { ...blankDraft().scores, ...i.scores } }; save.d(); fillScoreForm(); go('#score'); },
   delItem(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && confirm(`確定刪除「${i.name}」？`)) { items = items.filter((x) => x !== i); save.i(); renderList(); } },
@@ -536,7 +587,8 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('change', async (e) => {
   const t = e.target;
-  if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { i.status = t.value; save.i(); renderList(); } }
+  if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
+  else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
   else if (t.matches('[data-imp]') && t.files[0]) {
     try {
       const rows = await readTable(t.files[0]);

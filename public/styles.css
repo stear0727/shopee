@@ -194,6 +194,12 @@ a.btn{text-decoration:none}
 .post{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;background:var(--accbg);border-radius:12px;padding:10px 12px;margin:8px 0}
 .post p{margin:0;white-space:pre-wrap}
 .post button{flex:none;min-height:36px;padding:0 12px}
+.pick{display:inline-flex;align-items:center;margin:0 6px 0 0;vertical-align:middle}
+.pick input{width:22px;height:22px;min-height:0;margin:0;accent-color:var(--acc);cursor:pointer}
+.pubok{color:var(--ok);font-weight:600}
+.pc.isdone{opacity:.85}
+.mt{margin-top:24px}
+#pubQueue .empty,#pubDone .empty{grid-column:1/-1}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}

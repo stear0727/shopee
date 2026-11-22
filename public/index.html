@@ -19,6 +19,7 @@
 
 <nav class="side" aria-label="主要導覽">
   <a href="#list" data-v="list">商品</a>
+  <a href="#pub" data-v="pub">發布</a>
   <a href="#score" data-v="score">評分</a>
   <a href="#ai" data-v="ai">文案</a>
   <a href="#settings" data-v="settings">設定</a>
@@ -42,12 +43,24 @@
   </div>
   <div class="toolbar">
     <span id="listCount" class="tag"></span>
+    <button type="button" class="pri" id="pickBtn" data-act="pickAdd" disabled>加入發布清單（0）</button>
+    <button type="button" class="ghost" data-act="pickNone">取消選取</button>
     <span class="grow"></span>
     <button type="button" data-act="autoCatAll">自動分類</button>
     <button type="button" data-act="expItems">匯出 CSV</button>
   </div>
   <p class="hint">推薦指數＝系統分數 60%＋銷量 40%（銷量與清單中最高者相比）。分類依商品名稱關鍵字自動判斷，分錯可按「編輯」修改。</p>
   <div id="listBody"></div>
+</section>
+
+<!-- 發布清單 -->
+<section id="v-pub" class="view" hidden>
+  <h1 tabindex="-1">發布清單</h1>
+  <p class="hint">在「商品」頁勾選要發布的商品加入這裡。發文後按「標記已發布」，會自動記錄發布日期時間。</p>
+  <h2>待發布 <span class="tag" id="pubQueueN">0</span></h2>
+  <div id="pubQueue" class="cards"></div>
+  <h2 class="mt">已發布 <span class="tag" id="pubDoneN">0</span></h2>
+  <div id="pubDone" class="cards"></div>
 </section>
 
 <!-- 評分 -->
