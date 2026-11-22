@@ -480,7 +480,10 @@ function renderSettings() {
   $('#setWeights').innerHTML = DIMS.map((d) => `<label>${esc(d.n)}${d.auto ? '（自動）' : ''}<input type="number" min="0" max="100" inputmode="numeric" data-sw="${d.k}" value="${esc(S.weights[d.k])}"></label>`).join('');
   wSum(); checkConn();
 }
-function wSum() { const t = DIMS.reduce((s, d) => s + num(S.weights[d.k]), 0); $('#wSum').textContent = `權重合計 ${fmt(t)}${t === 100 ? '' : '（不是 100 時會自動按比例換算）'}`; }
+function wSum() {
+  const v = $$('[data-sw]').map((e) => num(e.value)), t = v.reduce((x, y) => x + y, 0);
+  $('#wSum').textContent = t ? `合計 ${fmt(t)}；實際比例：${DIMS.map((d, k) => `${d.n} ${fmt(v[k] / t * 100)}%`).join('、')}` : '權重合計不能為 0';
+}
 
 /* ========== 事件 ========== */
 const go = (h) => { if (location.hash === h) route(); else location.hash = h; };
@@ -569,7 +572,15 @@ const ACT = {
   expItems() { download(`商品清單_${today()}.csv`, toCSV(items.map(flatItem), ITEM_COLS)); },
   // 設定
   checkConn,
-  resetWeights() { S.weights = { ...DEF_W }; save.s(); renderSettings(); },
+  resetWeights() { $$('[data-sw]').forEach((e) => { e.value = DEF_W[e.dataset.sw]; }); wSum(); toast('已填入預設權重，按「儲存設定」生效'); },
+  saveSettings() {
+    const w = Object.fromEntries($$('[data-sw]').map((e) => [e.dataset.sw, clamp(num(e.value), 0, 100)]));
+    if (!Object.values(w).some((x) => x > 0)) { toast('權重合計不能為 0'); return; }
+    S.weights = w; S.accessCode = $('#setCode').value.trim(); S.ownKey = $('#setKey').value.trim();
+    save.s(); items.forEach(rescore); save.i();
+    $('#saveMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），商品分數已重新計算`;
+    checkConn();
+  },
   clearAll() {
     if (!confirm('確定清除所有本機資料（商品清單與設定）？此動作無法復原，建議先匯出 CSV。')) return;
     Object.keys(localStorage).filter((k) => k.startsWith('sp_')).forEach((k) => localStorage.removeItem(k));
@@ -606,9 +617,7 @@ document.addEventListener('change', async (e) => {
 document.addEventListener('input', (e) => {
   const t = e.target;
   if (t.id === 'listQ') renderList();
-  else if (t.id === 'setCode') { S.accessCode = t.value.trim(); save.s(); }
-  else if (t.id === 'setKey') { S.ownKey = t.value.trim(); save.s(); }
-  else if (t.dataset.sw) { S.weights[t.dataset.sw] = clamp(num(t.value), 0, 100); save.s(); wSum(); }
+  else if (t.dataset.sw) { wSum(); $('#saveMsg').textContent = '尚未儲存'; }
 });
 
 /* ========== 初始化 ========== */

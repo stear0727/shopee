@@ -71,17 +71,18 @@
   <h1 tabindex="-1">設定</h1>
   <div class="card"><h2>連線狀態</h2><p id="connStatus">檢查中…</p><div class="btns"><button type="button" data-act="checkConn">重新檢查</button></div></div>
   <div class="card">
-    <h2>存取</h2>
-    <label>存取碼<input id="setCode" type="password" autocomplete="off" maxlength="100"></label>
-    <label>自備 Gemini 金鑰（選填）<input id="setKey" type="password" autocomplete="off" maxlength="200"></label>
-    <p class="hint">自備金鑰只存在此瀏覽器，以標頭轉送，伺服器不記錄。共用電腦請勿填寫。</p>
-  </div>
-  <div class="card">
     <h2>評分權重</h2>
     <div id="setWeights" class="row2"></div>
     <p id="wSum" class="hint"></p>
-    <div class="btns"><button type="button" data-act="resetWeights">恢復預設權重</button></div>
+    <div class="btns"><button type="button" data-act="resetWeights">填入預設權重</button></div>
   </div>
+  <div class="card">
+    <h2>存取（選填）</h2>
+    <label>存取碼<input id="setCode" type="password" autocomplete="off" maxlength="100" placeholder="留空＝不送存取碼（伺服器未設定存取碼時可直接使用）"></label>
+    <label>自備 Gemini 金鑰<input id="setKey" type="password" autocomplete="off" maxlength="200" placeholder="留空＝使用伺服器預設金鑰"></label>
+    <p class="hint">留空就使用預設；有填寫就以填寫的為主。自備金鑰只存在此瀏覽器，以標頭轉送，伺服器不記錄。共用電腦請勿填寫。</p>
+  </div>
+  <div class="btns save-bar"><button type="button" class="pri" data-act="saveSettings">儲存設定</button><span id="saveMsg" class="hint"></span></div>
   <div class="card">
     <h2>資料管理</h2>
     <p class="hint">資料只存在此瀏覽器，換裝置不會同步；清除瀏覽器資料會遺失，請定期匯出 CSV 備份。</p>

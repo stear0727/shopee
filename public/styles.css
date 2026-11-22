@@ -207,6 +207,7 @@ a.btn{text-decoration:none}
 .btn-done,.btn-done:hover{border-color:var(--ok);cursor:default}
 .pc .acts .btn{min-height:38px;padding:0 10px;font-size:.8125rem}
 .tag.pubtag{background:var(--ok);border-color:var(--ok);color:var(--card);font-weight:700}
+.save-bar{align-items:center;margin:0 0 16px}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
