@@ -248,3 +248,9 @@ dialog{max-height:88vh;overflow:auto;width:min(760px,calc(100% - 24px))}
 .dlg-head button{min-height:40px;padding:0 12px}
 #dlgOut .card{border:0;padding:0;margin:0}
 dialog::backdrop{background:rgb(0 0 0 / .45)}
+.grade-tabs{align-items:center;margin-top:-4px}
+.grade-tabs .lbl{font-size:.8125rem;color:var(--mut);margin-right:2px}
+.grade-tabs button .grade{min-width:1.6em;padding:0 4px;border-width:1.5px;font-size:.8125rem}
+.grade-tabs button[aria-selected="true"] .grade{color:inherit}
+.grade-tabs button:disabled{opacity:.4;cursor:default}
+button.copied,button.copied:hover{background:var(--ok);border-color:var(--ok);color:var(--bg)}

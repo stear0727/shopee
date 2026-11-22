@@ -13,7 +13,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('sp_' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('sp_' + k, JSON.stringify(v)); } catch { toast('無法寫入本機儲存空間'); } },
 };
-function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2800); }
+function toast(m) { const t = $('#toast'), d = document.getElementById('dlg'); (d && d.open ? d : document.body).append(t); t.textContent = m; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2800); }
 const stat = (label, val, sub = '', cls = '') => `<div class="stat ${cls}"><span>${esc(label)}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
 
 /* ========== 常數 ========== */
@@ -200,9 +200,25 @@ function outCard(key, html, j, text) {
   ${src.length ? `<h3>來源</h3><ul>${src.map((s) => `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></li>`).join('')}</ul>` : ''}
   <p class="hint">模型：${esc(j.model)}｜AI 內容僅供參考，數字與規則請自行查證；發文請揭露含分潤連結。</p></div>`;
 }
-async function copy(text) {
-  try { await navigator.clipboard.writeText(text); toast('已複製'); }
-  catch { const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select(); document.execCommand('copy'); t.remove(); toast('已複製'); }
+// 複製：成功後按鈕本身短暫顯示「已複製」；對話框開啟時頁面其他區域不可互動，備援的 textarea 要放進對話框
+async function copy(text, btn) {
+  if (!text) { toast('沒有可複製的內容'); return; }
+  let ok = false;
+  try { await navigator.clipboard.writeText(text); ok = true; }
+  catch {
+    const d = document.getElementById('dlg'), t = document.createElement('textarea');
+    t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+    (d && d.open ? d : document.body).append(t); t.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    t.remove();
+  }
+  if (!ok) { toast('複製失敗，請手動選取文字複製'); return; }
+  toast('已複製');
+  if (btn) {
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+    btn.textContent = '✓ 已複製'; btn.classList.add('copied');
+    clearTimeout(btn._ct); btn._ct = setTimeout(() => { btn.textContent = btn.dataset.label; btn.classList.remove('copied'); }, 1600);
+  }
 }
 
 /* ========== CSV ========== */
@@ -425,7 +441,10 @@ function pubRow(i) {
   return `<article class="pc pub${done ? ' isdone' : ''}">
     <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
-    <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
+    <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
+    <div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${bonus()}%</span></div>
+    <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span></div>
+    <div class="pc-row"><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
     <div class="acts">
       ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button>`}
@@ -436,7 +455,7 @@ function pubRow(i) {
   </article>`;
 }
 
-let catSel = 'all', shownIds = [];
+let catSel = 'all', gradeSel = 'all', shownIds = [];
 function renderList() {
   // 類別按鈕：點選即顯示該類別排行（件數依類別多寡排序，「其他」放最後）
   const cnt = {};
@@ -448,10 +467,16 @@ function renderList() {
     .map(([k, l, n]) => `<button type="button" role="tab" data-act="catSel" data-c="${esc(k)}" aria-selected="${catSel === k}">${esc(l)} <span class="n">${n}</span></button>`).join('');
   calcRec();
   const q = norm($('#listQ').value), c = catSel;
-  const arr = items.filter((i) => (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)))
-    .sort(SORT_FN[$('#listSort').value] || SORT_FN.rec);
+  const inCat = items.filter((i) => (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)));
+  // 等級篩選：件數依目前類別與搜尋條件計算
+  const gc = { S: 0, A: 0, B: 0, C: 0 };
+  inCat.forEach((i) => { if (gc[i.grade] != null) gc[i.grade]++; });
+  if (gradeSel !== 'all' && !gc[gradeSel]) gradeSel = 'all';
+  $('#gradeChips').innerHTML = '<span class="lbl">等級</span>' + [['all', inCat.length], ...['S', 'A', 'B', 'C'].map((g) => [g, gc[g]])]
+    .map(([k, n]) => `<button type="button" role="tab" data-act="gradeSel" data-g="${k}" aria-selected="${gradeSel === k}"${k !== 'all' && !n ? ' disabled' : ''} title="${k === 'all' ? '全部等級' : `${k} 級：${GRADE_ACT[k]}`}">${k === 'all' ? '全部' : `<span class="grade g${k}">${k}</span>`} <span class="n">${n}</span></button>`).join('');
+  const arr = inCat.filter((i) => gradeSel === 'all' || i.grade === gradeSel).sort(SORT_FN[$('#listSort').value] || SORT_FN.rec);
   shownIds = arr.map((i) => i.id);
-  $('#listCount').textContent = `${c === 'all' ? '綜合排行' : `${c} 排行`}｜${arr.length} 件`;
+  $('#listCount').textContent = `${c === 'all' ? '綜合排行' : `${c} 排行`}${gradeSel === 'all' ? '' : `・${gradeSel} 級`}｜${arr.length} 件`;
   updPickBtn();
   if (!arr.length) { $('#listBody').innerHTML = `<p class="empty">${items.length ? '沒有符合條件的商品。' : '還沒有商品。請在上方匯入蝦皮匯出的商品檔。'}</p>`; return; }
   $('#listBody').innerHTML = `<div class="cards">${arr.map(cardItem).join('')}</div>`;
@@ -661,8 +686,8 @@ const ACT = {
       ${post ? `<div class="post fest"><p>${esc(post)}</p><button type="button" data-act="copy" data-k="festView">複製</button></div>` : '<p class="muted">AI 判斷此商品不適合搭配上述節慶，所以沒有產生節慶文案。</p>'}`;
     d.showModal();
   },
-  copy(b) { copy(outText[b.dataset.k] || ''); },
-  copyAff(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && safeUrl(i.aff)) copy(i.aff); },
+  copy(b) { copy(outText[b.dataset.k] || '', b); },
+  copyAff(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && safeUrl(i.aff)) copy(i.aff, b); },
   // 商品
   autoCatAll() {
     let n = 0;
@@ -670,6 +695,7 @@ const ACT = {
     save.i(); renderList(); toast(n ? `已自動分類 ${n} 件商品` : '所有商品都已有分類');
   },
   catSel(b) { catSel = b.dataset.c; renderList(); },
+  gradeSel(b) { gradeSel = b.dataset.g; renderList(); },
   queueOne(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; queue(i); save.i(); renderList(); toast('已加入發布清單'); },
   pickAdd() {
     let n = 0;

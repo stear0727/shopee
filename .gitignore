@@ -7,3 +7,4 @@ collector/output/
 .env.*
 /logo.png
 *.jpg
+promo/
