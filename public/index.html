@@ -84,7 +84,7 @@
           <label>平台<select name="platform" data-opt="platform"></select></label>
           <label>形式<select name="format" data-opt="format"></select></label>
         </div>
-        <datalist id="cats"><option value="美妝保養"><option value="居家收納"><option value="3C 配件"><option value="廚房用品"><option value="服飾配件"><option value="母嬰"><option value="寵物"><option value="食品"><option value="運動戶外"></datalist>
+        <datalist id="cats"><option value="美妝保養"><option value="居家生活"><option value="3C 配件"><option value="廚房用品"><option value="服飾配件"><option value="母嬰"><option value="寵物"><option value="食品"><option value="運動戶外"></datalist>
       </div>
       <div class="card"><h2>主觀評分（1–5）</h2><div id="sliders"></div></div>
     </form>
@@ -184,16 +184,31 @@
 
 <!-- M7 候選清單 -->
 <section id="v-list" class="view" hidden>
-  <h1 tabindex="-1">候選清單</h1>
+  <h1 tabindex="-1">蝦皮商品</h1>
+  <div class="card">
+    <h2>AI 找商品</h2>
+    <p class="hint">AI 用 Google 搜尋近期熱銷報導、開箱爆紅與評測，自動整理商品。價格、月銷、評分只在來源有寫時才填；分潤比例網路上通常查不到，請到蝦皮分潤後台確認後按「編輯」補上。</p>
+    <form id="fDiscover" class="row2" autocomplete="off">
+      <label>題材（選填）<input name="topic" maxlength="100" placeholder="例：夏季服飾、面膜；留空代表不限"></label>
+      <label>平台<select name="platform" data-opt="platformAll"></select></label>
+      <div class="btns span2"><button class="pri">AI 找商品</button></div>
+    </form>
+    <div id="discOut" aria-live="polite"></div>
+  </div>
+  <div class="filters">
+    <input id="listQ" type="search" placeholder="搜尋商品名稱、分類、摘要" aria-label="搜尋商品">
+    <select id="listCat" aria-label="類別"></select>
+    <select id="listFilter" aria-label="狀態"></select>
+    <select id="listSort" aria-label="排序"></select>
+  </div>
   <div class="toolbar">
-    <label class="inline">狀態<select id="listFilter"><option value="all">全部</option><option value="todo">待拍</option><option value="done">已發布</option><option value="drop">淘汰</option></select></label>
-    <span id="listCount" class="muted"></span>
+    <span id="listCount" class="tag"></span>
     <span class="grow"></span>
     <button type="button" data-act="expItems">匯出 CSV</button>
     <label class="btn">匯入 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="items"></label>
   </div>
-  <div id="scatter"></div>
-  <div id="listBody"></div>
+  <details class="card"><summary>分數 × 佣金散佈圖</summary><div id="scatter"></div></details>
+  <div id="listBody" class="cards"></div>
 </section>
 
 <!-- M10 商品排行榜 -->

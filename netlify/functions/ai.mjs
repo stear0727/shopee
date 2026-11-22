@@ -75,9 +75,10 @@ ${JSON.stringify(list)}
       const topic = s(p.topic, 100);
       return { search: true, extract: true, low: true, text: `請用 Google 搜尋，找出台灣近 14 天內在 ${where} 上爆紅或熱銷的商品${topic ? `，題材限定「${topic}」` : ''}。今天：${new Date().toISOString().slice(0, 10)}。
 可參考：蝦皮熱銷或熱搜相關報導、TikTok／Reels 熱門帶貨商品、開箱爆紅新聞、團購熱賣文章、比較評測。
-依「被多少來源提到、熱度多高」排序，最多 20 筆。只列搜尋結果中確實出現的具體商品（要有品牌或明確品名），不要編造；price 只有來源明確寫出時才填數字，否則 null。
+依「被多少來源提到、熱度多高」排序，最多 20 筆。只列搜尋結果中確實出現的具體商品（要有品牌或明確品名），不要編造。
+數字欄位（price、discount、rating、monthlySales、commissionRate）只有來源明確寫出時才填，否則 null，絕對不要估算或推測。commissionRate 是蝦皮分潤比例（%），一般文章不會寫，找不到就 null。
 只輸出 JSON，不要任何其他文字：
-{"items":[{"rank":1,"productName":"品牌＋品名","price":null,"reason":"為什麼熱門（25 字內）","sourceUrl":"來源網址或 null"}]}` };
+{"items":[{"rank":1,"productName":"品牌＋品名","category":"服飾配件|美妝保養|居家生活|3C 配件|廚房用品|母嬰|寵物|食品|運動戶外|其他 擇一","price":null,"discount":null,"rating":null,"monthlySales":null,"commissionRate":null,"trend":"上升|持平|下降|null","reason":"賣點與推薦理由，適合什麼受眾（60 字內）","sourceUrl":"來源網址或 null"}]}` };
     }
     case 'rank_extract':
       return { json: true, low: true, text: `從以下${hasImage ? '截圖' : '文字'}擷取商品排行。榜單來源：${plat(p.source)}。
