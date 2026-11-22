@@ -445,10 +445,6 @@ function renderPub() {
     .map(([k, l, n]) => `<button type="button" role="tab" data-act="pubSel" data-f="${k}" aria-selected="${pubSel === k}">${l} <span class="n">${n}</span></button>`).join('');
   const arr = all.filter((i) => pubSel === 'all' || (pubSel === 'done' ? i.status === 'done' : INQ(i)));
   pubShown = arr.map((i) => i.id);
-  $$('#pubView [data-v2]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.v2 === pubView)));
-  const cal = pubView === 'cal';
-  $('#pubTools').hidden = cal; $('#pubChips').hidden = cal; $('#pubQueue').hidden = cal; $('#pubCal').hidden = !cal;
-  if (cal) $('#pubCal').innerHTML = pubCalHtml();
   $('#pubQueue').innerHTML = arr.length ? arr.map(pubRow).join('')
     : all.length ? `<p class="empty">沒有${pubSel === 'done' ? '已發布' : '待發布'}的商品。</p>`
     : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
@@ -456,7 +452,7 @@ function renderPub() {
 }
 let pubSel = 'all', pubShown = [];
 
-/* ---------- 發布時間：手動排定＋日曆 ----------
+/* ---------- 發布時間：手動排定 ----------
  * i.schedAt：使用者排定的發布時間（本地時間 YYYY-MM-DDTHH:MM）
  */
 const PWD = ['日', '一', '二', '三', '四', '五', '六'];
@@ -481,46 +477,6 @@ function schedDlg(i) {
     <div class="btns"><button type="button" class="pri" data-act="schedSave" data-id="${esc(i.id)}">儲存</button>${i.schedAt ? `<button type="button" class="danger" data-act="schedClear" data-id="${esc(i.id)}">清除排定</button>` : ''}<button type="button" class="ghost" data-act="closeDlg">取消</button></div>`;
   if (!d.open) d.showModal();
 }
-// 日曆：已排定（橘色）、已發布（綠色）
-let pubView = 'list', pubMonth = '', pubDay = '';
-function pubEntries() {
-  const out = [];
-  for (const i of items) {
-    if (i.status === 'done') { const d = new Date(i.publishedAt); if (!Number.isNaN(+d)) out.push({ i, at: lISO(d), k: 'done' }); }
-    else if (INQ(i)) { if (okSlot(i.schedAt)) out.push({ i, at: i.schedAt, k: 'set' }); }
-  }
-  return out.sort((a, b) => a.at.localeCompare(b.at));
-}
-const PK = { set: '已排定', done: '已發布' };
-function pubCalHtml() {
-  const td = lISO(new Date()).slice(0, 10);
-  if (!pubDay) pubDay = td;
-  if (!pubMonth) pubMonth = pubDay.slice(0, 7);
-  const [y, m] = pubMonth.split('-').map(Number), first = new Date(y, m - 1, 1), start = new Date(y, m - 1, 1 - ((first.getDay() + 6) % 7));
-  const by = {};
-  for (const e of pubEntries()) (by[e.at.slice(0, 10)] ||= []).push(e);
-  const cells = [];
-  for (let k = 0; k < 42; k++) {
-    const d = new Date(start); d.setDate(start.getDate() + k);
-    if (k >= 35 && d.getMonth() !== m - 1) break;
-    const ds = lISO(d).slice(0, 10), list = by[ds] || [];
-    cells.push(`<button type="button" class="pcal-c${d.getMonth() !== m - 1 ? ' oth' : ''}${ds === td ? ' td' : ''}${ds === pubDay ? ' sel' : ''}" data-act="pubDay" data-d="${ds}" aria-label="${d.getMonth() + 1} 月 ${d.getDate()} 日，${list.length} 則">
-      <span class="pcal-n">${d.getDate()}</span>
-      <span class="pcal-dots">${list.slice(0, 4).map((e) => `<i class="k-${e.k}"></i>`).join('')}${list.length > 4 ? `<b>+${list.length - 4}</b>` : ''}</span>
-      <span class="pcal-t">${list.slice(0, 3).map((e) => `<span class="pcal-i k-${e.k}">${e.at.slice(11)} ${esc(e.i.name.slice(0, 14))}</span>`).join('')}${list.length > 3 ? `<span class="pcal-more">還有 ${list.length - 3} 則</span>` : ''}</span></button>`);
-  }
-  const day = by[pubDay] || [], dd = ld(pubDay);
-  return `<div class="pcal">
-    <div class="toolbar pcal-bar"><button type="button" data-act="pubMon" data-n="-1" aria-label="上個月">‹</button><b>${y} 年 ${m} 月</b><button type="button" data-act="pubMon" data-n="1" aria-label="下個月">›</button><button type="button" class="ghost" data-act="pubMon" data-n="0">今天</button></div>
-    <div class="pcal-h">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
-    <div class="pcal-g">${cells.join('')}</div>
-    <div class="pcal-legend"><span><i class="k-set"></i>已排定</span><span><i class="k-done"></i>已發布</span></div>
-  </div>
-  <div class="pcal-day"><h2>${dd.getMonth() + 1}/${dd.getDate()}（${PWD[dd.getDay()]}）</h2>
-    ${day.length ? day.map(({ i, at, k }) => `<div class="pcal-ag k-${k}"><span class="pcal-at">${at.slice(11)}</span><div><div class="pcal-nm">${esc(i.name)}</div><div class="sm muted">${PK[k]}</div>
-      <div class="btns">${k === 'done' ? '' : `<button type="button" data-act="schedOpen" data-id="${esc(i.id)}">排定時間</button>`}<button type="button" class="ghost" data-act="pubJump" data-id="${esc(i.id)}">查看卡片</button></div></div></div>`).join('') : '<p class="empty">這天沒有排程。</p>'}
-  </div>`;
-}
 // AI 文案裡的建議發文時段（舊資料沒有 aiData 時，從文字版「發文時段：」那行取出）
 function bestTimeOf(i) {
   const b = i.aiData && i.aiData.json && i.aiData.json.bestTime;
@@ -530,7 +486,7 @@ function bestTimeOf(i) {
 }
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
-  return `<article class="pc pub${done ? ' isdone' : ''}" id="pub-${id}">
+  return `<article class="pc pub${done ? ' isdone' : ''}">
     <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
@@ -775,22 +731,9 @@ const ACT = {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
     const at = `${$('#schedD').value}T${$('#schedT').value}`;
     if (!okSlot(at)) { toast('請選擇日期與時間'); return; }
-    i.schedAt = at; save.i(); $('#dlg').close(); pubDay = at.slice(0, 10); pubMonth = at.slice(0, 7); pubRedraw(); toast(`已排定 ${fmtSlot(at)}${ld(at) < new Date() ? '（這個時間已經過了）' : ''}`);
+    i.schedAt = at; save.i(); $('#dlg').close(); pubRedraw(); toast(`已排定 ${fmtSlot(at)}${ld(at) < new Date() ? '（這個時間已經過了）' : ''}`);
   },
   schedClear(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; i.schedAt = ''; save.i(); $('#dlg').close(); pubRedraw(); toast('已清除排定時間'); },
-  pubViewSet(b) { pubView = b.dataset.v2; renderPub(); },
-  pubDay(b) { pubDay = b.dataset.d; pubMonth = pubDay.slice(0, 7); pubRedraw(); },
-  pubMon(b) {
-    const n = Number(b.dataset.n);
-    if (!n) { pubDay = lISO(new Date()).slice(0, 10); pubMonth = pubDay.slice(0, 7); }
-    else { const [y, m] = pubMonth.split('-').map(Number); pubMonth = lISO(new Date(y, m - 1 + n, 1)).slice(0, 7); }
-    pubRedraw();
-  },
-  pubJump(b) {
-    pubView = 'list'; pubSel = 'all'; renderPub();
-    const el = document.getElementById('pub-' + b.dataset.id); if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600);
-  },
   navToggle() { setNavMini(!document.body.classList.contains('nav-mini')); },
   showFest(b) {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
