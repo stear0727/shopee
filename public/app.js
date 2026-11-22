@@ -42,7 +42,7 @@ const autoCat = (name, cat = '') => {
   for (const [c, re] of CAT_RE) if (re.test(s)) return c;
   return '其他';
 };
-const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText'];
+const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText', 'schedAt', 'sugAt', 'sugWhy'];
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
@@ -412,6 +412,7 @@ const picked = new Set(), pubPicked = new Set();
 const INQ = (i) => i.status === 'todo' || i.status === 'copy';   // 待發文、已產文案＝在發布清單中（未發布）
 const INPUB = (i) => INQ(i) || i.status === 'done';               // 發布清單中的全部商品（含已發布）
 const pad2 = (n) => String(n).padStart(2, '0');
+const sugBusy = new Set(), sugFail = {};   // AI 建議中／失敗原因（只存在這次開啟的頁面）
 const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' : `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 // 改狀態時一併處理發布時間：改成「已發布」自動記錄現在時間，改離「已發布」則清除
 function setStatus(i, s) {
@@ -419,7 +420,7 @@ function setStatus(i, s) {
   if (s === 'done' && i.status !== 'done') i.publishedAt = new Date().toISOString();
   if (s !== 'done') i.publishedAt = '';
   if ((s === 'todo' || s === 'copy') && !i.queuedAt) i.queuedAt = new Date().toISOString();
-  if (s === 'watch' || s === 'drop') i.queuedAt = '';
+  if (s === 'watch' || s === 'drop') { i.queuedAt = ''; i.schedAt = ''; i.sugAt = ''; i.sugWhy = ''; delete sugFail[i.id]; }   // 移出清單：排定與建議時間一併清除
   i.status = s;
 }
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
@@ -445,12 +446,120 @@ function renderPub() {
     .map(([k, l, n]) => `<button type="button" role="tab" data-act="pubSel" data-f="${k}" aria-selected="${pubSel === k}">${l} <span class="n">${n}</span></button>`).join('');
   const arr = all.filter((i) => pubSel === 'all' || (pubSel === 'done' ? i.status === 'done' : INQ(i)));
   pubShown = arr.map((i) => i.id);
+  $$('#pubView [data-v2]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.v2 === pubView)));
+  const cal = pubView === 'cal';
+  $('#pubTools').hidden = cal; $('#pubChips').hidden = cal; $('#pubQueue').hidden = cal; $('#pubCal').hidden = !cal;
+  if (cal) $('#pubCal').innerHTML = pubCalHtml();
+  pubSuggest();
   $('#pubQueue').innerHTML = arr.length ? arr.map(pubRow).join('')
     : all.length ? `<p class="empty">沒有${pubSel === 'done' ? '已發布' : '待發布'}的商品。</p>`
     : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
   updPubBtns();
 }
 let pubSel = 'all', pubShown = [];
+
+/* ---------- 發布時間：AI 建議＋手動排定＋日曆 ----------
+ * i.sugAt / i.sugWhy：AI 建議的發布時間（本地時間 YYYY-MM-DDTHH:MM）與理由
+ * i.schedAt：使用者排定的發布時間（同格式）
+ */
+const PWD = ['日', '一', '二', '三', '四', '五', '六'];
+const ld = (s) => { const [d, t = '00:00'] = String(s).split('T'); const [y, m, dd] = d.split('-').map(Number); const [h, mi] = t.split(':').map(Number); return new Date(y, (m || 1) - 1, dd || 1, h || 0, mi || 0); };
+const lISO = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+const okSlot = (s) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(s || '')) && !Number.isNaN(+ld(s));
+const fmtSlot = (s) => { const d = ld(s); return `${d.getMonth() + 1}/${d.getDate()}（${PWD[d.getDay()]}）${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const SUG_BATCH = 5;                       // 每次送 5 件，避免超過伺服器處理時間
+let sugRunning = false;
+// 找出發布清單中還沒有建議也沒有排定時間的商品，請 AI 建議發布時間
+async function pubSuggest() {
+  if (sugRunning) return;
+  const need = items.filter((i) => INQ(i) && !i.sugAt && !i.schedAt && !(i.id in sugFail));
+  if (!need.length) return;
+  sugRunning = true; need.forEach((i) => sugBusy.add(i.id)); pubRedraw();
+  try {
+    for (let k = 0; k < need.length; k += SUG_BATCH) {
+      const part = need.slice(k, k + SUG_BATCH).filter((i) => INQ(i) && !i.sugAt && !i.schedAt);
+      if (!part.length) continue;
+      const now = new Date(), taken = items.filter(INQ).map((i) => i.schedAt || i.sugAt).filter((s) => okSlot(s) && ld(s) > now).map((s) => s.replace('T', ' '));
+      try {
+        const j = await ai('suggest', { items: part.map((i) => ({ id: i.id, name: i.name, category: i.category, price: num(i.price) })), taken });
+        for (const r of (j.json && Array.isArray(j.json.plans) ? j.json.plans : [])) {
+          const i = part.find((x) => x.id === r.id), m = /^(\d{1,2}):(\d{2})$/.exec(String(r.time || '').trim());
+          if (!i || !m || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.date)) || Number(m[1]) > 23 || Number(m[2]) > 59) continue;
+          const at = `${r.date}T${pad2(Number(m[1]))}:${m[2]}`;
+          if (!okSlot(at)) continue;
+          i.sugAt = at; i.sugWhy = String(r.why || '').slice(0, 30);
+        }
+        part.forEach((i) => { if (!i.sugAt && !i.schedAt) sugFail[i.id] = 'AI 沒有回傳這件的建議'; });
+      } catch (e) {
+        const msg = e.status === 429 ? 'Gemini 額度用完或請求太頻繁，請稍後再試' : e.status === 502 || e.status === 504 ? 'AI 回應太慢，請重試' : e.message || 'AI 建議失敗';
+        need.slice(k).forEach((i) => { if (!i.sugAt && !i.schedAt) sugFail[i.id] = msg; });
+        break;
+      } finally { part.forEach((i) => sugBusy.delete(i.id)); save.i(); pubRedraw(); }
+    }
+  } finally { sugRunning = false; need.forEach((i) => sugBusy.delete(i.id)); pubRedraw(); }
+}
+const pubRedraw = () => { if (location.hash === '#pub' && !$('#dlg').open) { const y = window.scrollY; renderPub(); window.scrollTo(0, y); } };
+// 卡片上的發布時間區塊
+function pubTimeHtml(i) {
+  if (i.status === 'done') return '';
+  const id = esc(i.id), out = [];
+  if (okSlot(i.schedAt)) out.push(`<div class="ptime set"><b>📅 排定發布</b><span>${esc(fmtSlot(i.schedAt))}${ld(i.schedAt) < new Date() ? '<em class="od">（時間已過）</em>' : ''}</span></div>`);
+  if (okSlot(i.sugAt)) out.push(`<div class="ptime sug"><b>🤖 AI 建議發布時間</b><span>${esc(fmtSlot(i.sugAt))}${i.sugWhy ? `｜${esc(i.sugWhy)}` : ''}</span>${i.schedAt === i.sugAt ? '' : `<button type="button" class="link" data-act="useSug" data-id="${id}">採用這個時間</button>`}</div>`);
+  else if (sugBusy.has(i.id)) out.push('<div class="ptime sug"><span>🤖 AI 正在建議發布時間…</span></div>');
+  else if (sugFail[i.id] && !i.schedAt) out.push(`<div class="ptime bad"><span>AI 建議失敗：${esc(sugFail[i.id])}</span><button type="button" class="link" data-act="sugRetry" data-id="${id}">重試</button></div>`);
+  return out.join('');
+}
+// 排定時間視窗：選日期與時間（預設帶入已排定或 AI 建議的時間）
+function schedDlg(i) {
+  const d = $('#dlg'), base = okSlot(i.schedAt) ? i.schedAt : okSlot(i.sugAt) ? i.sugAt : lISO(new Date(Date.now() + 864e5)).slice(0, 11) + '20:00';
+  const today = lISO(new Date()).slice(0, 10);
+  d.innerHTML = `<div class="dlg-head"><h2>排定發布時間</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+    <p class="hint">${esc(i.name)}</p>
+    ${okSlot(i.sugAt) ? `<div class="ptime sug"><b>🤖 AI 建議</b><span>${esc(fmtSlot(i.sugAt))}${i.sugWhy ? `｜${esc(i.sugWhy)}` : ''}</span><button type="button" class="link" data-act="fillSug" data-at="${esc(i.sugAt)}">帶入建議時間</button></div>` : ''}
+    <div class="row2"><label>日期<input id="schedD" type="date" min="${today}" value="${esc(base.slice(0, 10))}"></label><label>時間<input id="schedT" type="time" step="300" value="${esc(base.slice(11, 16))}"></label></div>
+    <div class="btns"><button type="button" class="pri" data-act="schedSave" data-id="${esc(i.id)}">儲存</button>${i.schedAt ? `<button type="button" class="danger" data-act="schedClear" data-id="${esc(i.id)}">清除排定</button>` : ''}<button type="button" class="ghost" data-act="closeDlg">取消</button></div>`;
+  if (!d.open) d.showModal();
+}
+// 日曆：已排定（實心）、AI 建議但還沒排定（虛線）、已發布（綠色）
+let pubView = 'list', pubMonth = '', pubDay = '';
+function pubEntries() {
+  const out = [];
+  for (const i of items) {
+    if (i.status === 'done') { const d = new Date(i.publishedAt); if (!Number.isNaN(+d)) out.push({ i, at: lISO(d), k: 'done' }); }
+    else if (INQ(i)) { if (okSlot(i.schedAt)) out.push({ i, at: i.schedAt, k: 'set' }); else if (okSlot(i.sugAt)) out.push({ i, at: i.sugAt, k: 'sug' }); }
+  }
+  return out.sort((a, b) => a.at.localeCompare(b.at));
+}
+const PK = { set: '已排定', sug: 'AI 建議（還沒排定）', done: '已發布' };
+function pubCalHtml() {
+  const td = lISO(new Date()).slice(0, 10);
+  if (!pubDay) pubDay = td;
+  if (!pubMonth) pubMonth = pubDay.slice(0, 7);
+  const [y, m] = pubMonth.split('-').map(Number), first = new Date(y, m - 1, 1), start = new Date(y, m - 1, 1 - ((first.getDay() + 6) % 7));
+  const by = {};
+  for (const e of pubEntries()) (by[e.at.slice(0, 10)] ||= []).push(e);
+  const cells = [];
+  for (let k = 0; k < 42; k++) {
+    const d = new Date(start); d.setDate(start.getDate() + k);
+    if (k >= 35 && d.getMonth() !== m - 1) break;
+    const ds = lISO(d).slice(0, 10), list = by[ds] || [];
+    cells.push(`<button type="button" class="pcal-c${d.getMonth() !== m - 1 ? ' oth' : ''}${ds === td ? ' td' : ''}${ds === pubDay ? ' sel' : ''}" data-act="pubDay" data-d="${ds}" aria-label="${d.getMonth() + 1} 月 ${d.getDate()} 日，${list.length} 則">
+      <span class="pcal-n">${d.getDate()}</span>
+      <span class="pcal-dots">${list.slice(0, 4).map((e) => `<i class="k-${e.k}"></i>`).join('')}${list.length > 4 ? `<b>+${list.length - 4}</b>` : ''}</span>
+      <span class="pcal-t">${list.slice(0, 3).map((e) => `<span class="pcal-i k-${e.k}">${e.at.slice(11)} ${esc(e.i.name.slice(0, 14))}</span>`).join('')}${list.length > 3 ? `<span class="pcal-more">還有 ${list.length - 3} 則</span>` : ''}</span></button>`);
+  }
+  const day = by[pubDay] || [], dd = ld(pubDay);
+  return `<div class="pcal">
+    <div class="toolbar pcal-bar"><button type="button" data-act="pubMon" data-n="-1" aria-label="上個月">‹</button><b>${y} 年 ${m} 月</b><button type="button" data-act="pubMon" data-n="1" aria-label="下個月">›</button><button type="button" class="ghost" data-act="pubMon" data-n="0">今天</button></div>
+    <div class="pcal-h">${['一', '二', '三', '四', '五', '六', '日'].map((w) => `<span>${w}</span>`).join('')}</div>
+    <div class="pcal-g">${cells.join('')}</div>
+    <div class="pcal-legend"><span><i class="k-set"></i>已排定</span><span><i class="k-sug"></i>AI 建議（還沒排定）</span><span><i class="k-done"></i>已發布</span></div>
+  </div>
+  <div class="pcal-day"><h2>${dd.getMonth() + 1}/${dd.getDate()}（${PWD[dd.getDay()]}）</h2>
+    ${day.length ? day.map(({ i, at, k }) => `<div class="pcal-ag k-${k}"><span class="pcal-at">${at.slice(11)}</span><div><div class="pcal-nm">${esc(i.name)}</div><div class="sm muted">${PK[k]}${k === 'sug' && i.sugWhy ? `｜${esc(i.sugWhy)}` : ''}</div>
+      <div class="btns">${k === 'done' ? '' : `<button type="button" data-act="schedOpen" data-id="${esc(i.id)}">排定時間</button>`}${k === 'sug' ? `<button type="button" data-act="useSug" data-id="${esc(i.id)}">採用建議</button>` : ''}<button type="button" class="ghost" data-act="pubJump" data-id="${esc(i.id)}">查看卡片</button></div></div></div>`).join('') : '<p class="empty">這天沒有排程。</p>'}
+  </div>`;
+}
 // AI 文案裡的建議發文時段（舊資料沒有 aiData 時，從文字版「發文時段：」那行取出）
 function bestTimeOf(i) {
   const b = i.aiData && i.aiData.json && i.aiData.json.bestTime;
@@ -460,7 +569,7 @@ function bestTimeOf(i) {
 }
 function pubRow(i) {
   const id = esc(i.id), done = i.status === 'done';
-  return `<article class="pc pub${done ? ' isdone' : ''}">
+  return `<article class="pc pub${done ? ' isdone' : ''}" id="pub-${id}">
     <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
@@ -468,9 +577,10 @@ function pubRow(i) {
     <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${safeUrl(i.url) ? `<a href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</span></div>
     <div class="pc-row"><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
-    ${bestTimeOf(i) ? `<div class="besttime"><b>⏰ 建議發文時段</b><span>${esc(bestTimeOf(i))}</span></div>` : ''}
+    ${pubTimeHtml(i)}
+    ${bestTimeOf(i) ? `<div class="besttime"><b>⏰ 文案建議時段</b><span>${esc(bestTimeOf(i))}</span></div>` : ''}
     <div class="acts">
-      ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button>`}
+      ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button><button type="button" data-act="schedOpen" data-id="${id}">${okSlot(i.schedAt) ? '修改排定時間' : '排定時間'}</button>`}
       ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
       ${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}${i.aiFest ? `<button type="button" data-act="showFest" data-id="${id}">節慶資訊</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">${i.aiText ? '重新產文案' : '產生文案'}</button>
       ${done ? '' : `<button type="button" class="ghost" data-act="unqueue" data-id="${id}">移出清單</button>`}
@@ -698,6 +808,31 @@ const ACT = {
     if (!d.open) d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
+  // 發布時間
+  schedOpen(b) { const i = items.find((x) => x.id === b.dataset.id); if (i) schedDlg(i); },
+  fillSug(b) { $('#schedD').value = b.dataset.at.slice(0, 10); $('#schedT').value = b.dataset.at.slice(11, 16); },
+  schedSave(b) {
+    const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
+    const at = `${$('#schedD').value}T${$('#schedT').value}`;
+    if (!okSlot(at)) { toast('請選擇日期與時間'); return; }
+    i.schedAt = at; save.i(); $('#dlg').close(); pubDay = at.slice(0, 10); pubMonth = at.slice(0, 7); pubRedraw(); toast(`已排定 ${fmtSlot(at)}${ld(at) < new Date() ? '（這個時間已經過了）' : ''}`);
+  },
+  schedClear(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; i.schedAt = ''; save.i(); $('#dlg').close(); pubRedraw(); toast('已清除排定時間'); },
+  useSug(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i || !okSlot(i.sugAt)) return; i.schedAt = i.sugAt; save.i(); pubRedraw(); toast(`已排定 ${fmtSlot(i.sugAt)}`); },
+  sugRetry(b) { delete sugFail[b.dataset.id]; pubSuggest(); },
+  pubViewSet(b) { pubView = b.dataset.v2; renderPub(); },
+  pubDay(b) { pubDay = b.dataset.d; pubMonth = pubDay.slice(0, 7); pubRedraw(); },
+  pubMon(b) {
+    const n = Number(b.dataset.n);
+    if (!n) { pubDay = lISO(new Date()).slice(0, 10); pubMonth = pubDay.slice(0, 7); }
+    else { const [y, m] = pubMonth.split('-').map(Number); pubMonth = lISO(new Date(y, m - 1 + n, 1)).slice(0, 7); }
+    pubRedraw();
+  },
+  pubJump(b) {
+    pubView = 'list'; pubSel = 'all'; renderPub();
+    const el = document.getElementById('pub-' + b.dataset.id); if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600);
+  },
   navToggle() { setNavMini(!document.body.classList.contains('nav-mini')); },
   showFest(b) {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
@@ -721,11 +856,11 @@ const ACT = {
   },
   catSel(b) { catSel = b.dataset.c; renderList(); },
   gradeSel(b) { gradeSel = b.dataset.g; renderList(); },
-  queueOne(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; queue(i); save.i(); renderList(); toast('已加入發布清單'); },
+  queueOne(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; queue(i); save.i(); renderList(); toast('已加入發布清單，AI 正在建議發布時間'); pubSuggest(); },
   pickAdd() {
     let n = 0;
     for (const id of picked) { const i = items.find((x) => x.id === id); if (i && !INQ(i) && i.status !== 'done') { queue(i); n++; } }
-    picked.clear(); save.i(); renderList(); toast(n ? `已加入發布清單 ${n} 件` : '選取的商品已在清單或已發布');
+    picked.clear(); save.i(); renderList(); toast(n ? `已加入發布清單 ${n} 件，AI 正在建議發布時間` : '選取的商品已在清單或已發布'); if (n) pubSuggest();
   },
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },

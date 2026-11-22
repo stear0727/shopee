@@ -1,7 +1,7 @@
 // /api/ai — 唯一的後端端點：任務白名單、伺服器端組裝提示詞、呼叫 Gemini。
 // 金鑰只來自環境變數 GEMINI_API_KEY，或使用者以 x-gemini-key 標頭自備（不記錄、不寫日誌）。
 
-const TASKS = new Set(['analyze']);
+const TASKS = new Set(['analyze', 'suggest']);
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
 const MAX_IMAGE = 2_200_000;            // 壓縮後截圖 base64 上限（約 1.6 MB 原始）
 const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
@@ -36,6 +36,22 @@ function scores(o) {
 
 function build(task, p, hasImage) {
   switch (task) {
+    case 'suggest': {
+      // 發布清單：替剛加入的商品建議發布日期與時間（台灣時間）
+      const now = new Date(Date.now() + 8 * 3600e3), wd = '日一二三四五六'[now.getUTCDay()];
+      const nowText = `${now.toISOString().slice(0, 10)} ${now.toISOString().slice(11, 16)}（星期${wd}）`;
+      const list = (Array.isArray(p.items) ? p.items : []).slice(0, 10).map((x) => ({ id: s(x.id, 40), 商品: s(x.name, 80), 分類: s(x.category, 40), 價格: n(x.price) }));
+      const taken = (Array.isArray(p.taken) ? p.taken : []).slice(0, 60).map((x) => s(x, 16));
+      return { json: true, low: true, text: `你是台灣社群媒體（${SOCIAL}）蝦皮分潤貼文的排程助理。現在是台灣時間 ${nowText}。
+請替下列每件商品建議一個發布日期與時間（台灣時間）。
+規則：
+1. 日期在現在之後的 7 天內，時間至少比現在晚 1 小時。
+2. 依商品分類的目標族群（例如上班族、學生、家長、寵物飼主）與商品特性，判斷他們最常滑手機的日子與時段；平日與週末的習慣不同。
+3. 不要跟「已排定的時間」或彼此相差不到 1 小時；同一天最多 3 則，同類商品盡量分散到不同天。
+已排定的時間：${JSON.stringify(taken)}
+商品：${JSON.stringify(list)}
+只輸出 JSON：{"plans":[{"id":"原樣帶回的 id","date":"YYYY-MM-DD","time":"HH:MM（24 小時制）","why":"15 字內的理由"}]}` };
+    }
     case 'analyze': {
       // 節慶／活動資訊由使用者提供（前端預設帶入近三週節慶，可修改或關閉）
       const fest = p.wantFest ? s(p.festival, 500) : '';
