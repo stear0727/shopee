@@ -10,7 +10,6 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 <script src="app.js" defer></script>
-<script src="cal.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">跳到主要內容</a>
@@ -23,7 +22,6 @@
   <button type="button" class="nav-toggle" data-act="navToggle" aria-label="收合選單" aria-expanded="true" title="收合選單"><span aria-hidden="true">«</span></button>
   <a href="#list" data-v="list" title="商品分析"><span class="ic" aria-hidden="true">📦</span><span class="lb">商品分析</span></a>
   <a href="#pub" data-v="pub" title="發布清單"><span class="ic" aria-hidden="true">📝</span><span class="lb">發布清單</span></a>
-  <a href="#cal" data-v="cal" title="內容日曆"><span class="ic" aria-hidden="true">📅</span><span class="lb">內容日曆</span></a>
   <a href="#settings" data-v="settings" title="設定"><span class="ic" aria-hidden="true">⚙️</span><span class="lb">設定</span></a>
 </nav>
 
@@ -64,7 +62,7 @@
 <!-- 發布清單 -->
 <section id="v-pub" class="view" hidden>
   <h1 tabindex="-1">發布清單</h1>
-  <p class="hint">這裡是你在「商品分析」勾選、手動加入並手動發布的商品；跟「內容日曆」是獨立的功能。按「產生文案」可設定是否加一段節慶活動文案，再由 AI 產生；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
+  <p class="hint">這裡是你在「商品分析」勾選、手動加入並手動發布的商品。按「產生文案」可設定是否加一段節慶活動文案，再由 AI 產生；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
   <h2>待發布 <span class="tag" id="pubQueueN">0</span> 已發布 <span class="tag pubtag" id="pubDoneN">0</span></h2>
   <div class="tabs cat-tabs" id="pubChips" role="tablist" aria-label="篩選發布狀態"></div>
   <div class="toolbar">
@@ -75,28 +73,6 @@
     <button type="button" id="pubOutBtn" data-act="pubOutSel" disabled>移出清單（0）</button>
   </div>
   <div id="pubQueue" class="cards"></div>
-</section>
-
-<!-- 內容日曆 -->
-<section id="v-cal" class="view" hidden>
-  <h1 tabindex="-1">內容日曆</h1>
-  <p class="hint">依商品評分、熱度與檔期，每週排出建議發文清單（S→A→B 依序排入）。日曆從「商品分析」的全部商品挑選、由 AI 排日期與時間，跟發布清單（手動加入、手動發布）是獨立的兩個功能：在這裡確定排定、產生文案，發文後標記已發布。系統只建議、不發布。</p>
-  <div class="tabs" id="calTabs" role="tablist" aria-label="內容日曆畫面">
-    <button type="button" role="tab" data-act="calTab" data-t="month">月曆</button>
-    <button type="button" role="tab" data-act="calTab" data-t="list">清單</button>
-    <button type="button" role="tab" data-act="calTab" data-t="events">檔期管理</button>
-    <button type="button" role="tab" data-act="calTab" data-t="set">排程設定</button>
-  </div>
-  <div class="toolbar cal-bar" id="calWeekBar">
-    <button type="button" data-act="calPrev" aria-label="上一頁">‹</button>
-    <b id="calRange" class="cal-range"></b>
-    <button type="button" data-act="calNext" aria-label="下一頁">›</button>
-    <button type="button" class="ghost" data-act="calToday">今天</button>
-    <span class="grow"></span>
-    <button type="button" class="pri" id="calFind" data-act="calFind">🔍 尋找商品</button>
-  </div>
-  <div id="calAlerts"></div>
-  <div id="calBody"></div>
 </section>
 
 <!-- 設定 -->

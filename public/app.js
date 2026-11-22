@@ -298,7 +298,7 @@ function importShopee(rows) {
     vals.push({ price, sales: num(sales), comm: commOf({ price, base: rate }) });
     const old = items.find((i) => (id && i.id === id) || (pid && (String(i.url).match(/(\d+)$/) || [])[1] === pid) || keyOf(i.name) === keyOf(name));
     if (old) {
-      // 與上次匯入比較：價格上漲 10% 以上、分潤率下降 → 風險標記；銷量變化 → 趨勢（供內容日曆使用）
+      // 與上次匯入比較：價格上漲 10% 以上、分潤率下降 → 風險標記；銷量變化 → 趨勢
       const risk = [];
       if (price && num(old.price) && price >= num(old.price) * 1.1) risk.push('價格剛上漲');
       if (rate && num(old.base) && rate < num(old.base)) risk.push('分潤率下降');
@@ -536,7 +536,7 @@ function editItem(id) {
     <label>商品網址<input name="url" type="url" maxlength="500" value="${esc(i.url)}"></label>
     <label>推廣連結（分潤短網址）<input name="aff" type="url" maxlength="300" value="${esc(i.aff)}"></label>
     <label>備註<textarea name="note" rows="2" maxlength="500">${esc(i.note)}</textarea></label>
-    <div class="checks"><label><input type="checkbox" name="oos"${i.oos ? ' checked' : ''}>缺貨（內容日曆暫不排入）</label>${Array.isArray(i.risk) && i.risk.length ? `<label><input type="checkbox" name="clrRisk">清除警示：${esc(i.risk.join('、'))}</label>` : ''}</div>
+    <div class="checks"><label><input type="checkbox" name="oos"${i.oos ? ' checked' : ''}>缺貨</label>${Array.isArray(i.risk) && i.risk.length ? `<label><input type="checkbox" name="clrRisk">清除警示：${esc(i.risk.join('、'))}</label>` : ''}</div>
     <h3>實際成效回填（復盤）</h3><div class="row2">${nf('views', '觸及', a.views)}${nf('clicks', '點擊', a.clicks)}${nf('orders', '訂單', a.orders)}${nf('commission', '佣金（元）', a.commission)}</div>
     <p class="hint">分潤比例請以蝦皮分潤後台為準；修改後分數會自動重算。</p>
     <div class="btns"><button value="cancel" formnovalidate>取消</button><button value="ok" class="pri">儲存</button></div></form>`;
@@ -576,7 +576,7 @@ function wSum() {
 
 /* ========== 雲端同步（電腦與手機共用同一份資料） ========== */
 // 每件商品記錄最後修改時間 mt；刪除的商品記在 tomb（墓碑），合併時以較新的版本為準
-const SYNC_SETTINGS = ['weights', 'wv', 'thr', 'bonus', 'festOn', 'alias', 'cal', 'events', 'calGen'];
+const SYNC_SETTINGS = ['weights', 'wv', 'thr', 'bonus', 'festOn', 'alias'];
 let tomb = store.get('tomb', {}), snap = store.get('snap', null), syncAt = store.get('syncAt', 0);
 let syncing = false, syncAgain = false, syncTimer = 0, lastPull = 0, syncDirty = store.get('syncDirty', false);
 const hashStr = (str) => { let h = 5381; for (let k = 0; k < str.length; k++) h = ((h << 5) + h + str.charCodeAt(k)) >>> 0; return h.toString(36); };
@@ -687,7 +687,7 @@ const ACT = {
       i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
       i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : '';
       if (i.status === 'todo') setStatus(i, 'copy');
-      save.i(); softRefresh();   // 對話框開著時會等關閉後再重繪目前畫面（發布清單或日曆）
+      save.i(); softRefresh();   // 對話框開著時會等關閉後再重繪目前畫面（發布清單）
     } catch (e) { showErr(el, e); }
   },
   viewCopy(b) {
