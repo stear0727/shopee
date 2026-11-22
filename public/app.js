@@ -25,7 +25,26 @@ const SRC_SHORT = { reels: 'IG', fb: 'FB', shorts: 'YT', tiktok: 'TikTok', threa
 const FORMATS = ['開箱', '前後對比', '教學示範', '情境短劇', '清單推薦', '實測評比'];
 const STATUS = { watch: '觀望中', todo: '待拍', copy: '已產文案', done: '已發布', drop: '淘汰' };
 const ACTIVE = ['watch', 'todo', 'copy'];
-const SORTS = { rate: '佣金高低', score: '分數高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
+const SORTS = { rec: '綜合推薦', rate: '佣金高低', score: '分數高低', sales: '月銷高低', priceAsc: '價格低到高', new: '最新加入' };
+const CATS = ['服飾配件', '美妝保養', '居家生活', '3C 配件', '廚房用品', '母嬰', '寵物', '食品', '運動戶外', '其他'];
+// 關鍵字自動分類（依順序比對，先比對較明確的類別）
+const CAT_RE = [
+  ['寵物', /寵物|貓|狗|犬|飼料|罐罐|牽繩|逗貓/],
+  ['母嬰', /嬰|寶寶|兒童|孕|奶瓶|尿布|童裝|奶嘴|學步|玩具|母嬰/],
+  ['3C 配件', /手機|充電|行動電源|傳輸線|耳機|藍牙|喇叭|滑鼠|鍵盤|螢幕|保護貼|手機殼|平板|筆電|USB|記憶卡|相機|自拍|手環|智慧|3C|電競/i],
+  ['美妝保養', /面膜|精華|乳液|化妝水|防曬|洗面|卸妝|口紅|唇|粉底|眼影|睫毛|眉|香水|保養|乳霜|霜|美白|彩妝|美妝|指甲|洗髮|潤髮|護髮|沐浴|身體乳|髮|膚/],
+  ['食品', /零食|餅乾|杏仁|蜂蜜|牛奶|奶酥|肉鬆|蛋捲|起司|蛋糕|麻糬|鳳梨酥|水果|果凍|雞胸|滴雞精|咖啡豆|茶包|茶葉|堅果|泡麵|巧克力|糖|果乾|肉乾|保健|維他命|益生菌|膠原|食品|醬|麵|米|飲品/],
+  ['運動戶外', /運動|瑜珈|健身|登山|露營|跑步|自行車|單車|泳|啞鈴|彈力帶|戶外|球拍|護膝/],
+  ['廚房用品', /鍋|碗|盤|杯|刀具|菜刀|砧板|保鮮|便當|餐具|筷|湯匙|廚房|烤箱|氣炸|電鍋|果汁機|咖啡機|水壺|保溫/],
+  ['居家生活', /收納|置物|掛勾|毛巾|床|枕|被|寢具|窗簾|地墊|清潔|拖把|掃|垃圾|衣架|燈|香氛|擴香|浴室|洗衣|除濕|抽屜|居家|家具|椅|桌/],
+  ['服飾配件', /上衣|T恤|背心|襯衫|外套|褲|裙|洋裝|衣|襪|帽|鞋|包|皮夾|錢包|圍巾|手套|項鍊|耳環|戒指|手錶|眼鏡|飾品|服飾/],
+];
+const autoCat = (name, cat = '') => {
+  if (CATS.includes(cat) && cat !== '其他') return cat;
+  const s = `${cat || ''} ${name || ''}`;
+  for (const [c, re] of CAT_RE) if (re.test(s)) return c;
+  return '其他';
+};
 const EXTRA = ['discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText'];
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
@@ -245,7 +264,7 @@ function importItems(rows) {
   let n = 0;
   for (const r of rows) {
     if (!r.name) continue;
-    const it = makeItem({ ...r, url: safeUrl(r.url), scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, clamp(Math.round(num(r[d.k])) || 3, 1, 5)])) });
+    const it = makeItem({ ...r, url: safeUrl(r.url), category: r.src === 'shopee' ? autoCat(r.name, r.category) : r.category, scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, clamp(Math.round(num(r[d.k])) || 3, 1, 5)])) });
     it.id = r.id || it.id; it.status = STATUS[r.status] ? r.status : 'todo'; it.note = String(r.note || '').slice(0, 500);
     it.actual = { views: r.views || '', clicks: r.clicks || '', orders: r.orders || '', commission: r.commission || '' };
     it.createdAt = r.createdAt || it.createdAt;
@@ -253,7 +272,7 @@ function importItems(rows) {
     if (ix >= 0 && r.src === 'shopee') {
       // 重新匯入擷取器資料時，只更新商品數字，保留你改過的狀態、評分、備註與文案
       const o = items[ix];
-      Object.assign(o, { name: it.name, category: it.category || o.category, price: it.price || o.price, base: it.base || o.base, discount: it.discount, rating: it.rating, sales: it.sales, url: it.url || o.url, summary: it.summary });
+      Object.assign(o, { name: it.name, category: o.category || it.category, price: it.price || o.price, base: it.base || o.base, discount: it.discount, rating: it.rating, sales: it.sales, url: it.url || o.url, summary: it.summary });
       rescore(o);
     } else if (ix >= 0) items[ix] = it; else items.push(it);
     n++;
@@ -352,7 +371,7 @@ function makeItem(p) {
 function rescore(i) { const r = scoreOf(i); i.total = r.total; i.grade = r.grade; i.rate = num(i.base) + num(i.xtra); }
 function itemFromAI(x, platform) {
   const trust = num(x.rating) >= 4.7 && num(x.sales) >= 1000 ? 5 : num(x.rating) >= 4.5 ? 4 : 3;
-  const it = makeItem({ ...blankDraft(), name: x.productName, category: x.category, price: x.price, base: x.rate, platform: PLATFORMS[platform] ? platform : 'reels',
+  const it = makeItem({ ...blankDraft(), name: x.productName, category: autoCat(x.productName, x.category), price: x.price, base: x.rate, platform: PLATFORMS[platform] ? platform : 'reels',
     scores: { ...blankDraft().scores, topic: x.trend === '上升' ? 5 : 4, trust }, discount: x.discount, rating: x.rating, sales: x.sales, trend: x.trend, summary: x.note, url: x.url, src: 'ai' });
   it.status = 'watch';
   return it;
@@ -426,7 +445,15 @@ function pfItems() {
 }
 
 /* ========== M7 候選清單 ========== */
+let recMap = {};
+// 綜合推薦指數 0–100：系統分數 50%、單筆期望佣金 30%（相對最高者）、銷量 20%（對數，相對最高者）
+function calcRec() {
+  const act = items.filter((i) => i.status !== 'drop');
+  const maxE = Math.max(1, ...act.map(expOf)), maxS = Math.max(1, ...act.map((i) => num(i.sales)));
+  recMap = Object.fromEntries(items.map((i) => [i.id, Math.round(100 * (0.5 * i.total / 100 + 0.3 * Math.min(1, expOf(i) / maxE) + 0.2 * (num(i.sales) > 0 ? Math.log10(num(i.sales) + 1) / Math.log10(maxS + 1) : 0)))]));
+}
 const SORT_FN = {
+  rec: (a, b) => (recMap[b.id] || 0) - (recMap[a.id] || 0) || b.total - a.total,
   rate: (a, b) => num(b.base) + num(b.xtra) - num(a.base) - num(a.xtra) || b.total - a.total,
   score: (a, b) => b.total - a.total,
   sales: (a, b) => num(b.sales) - num(a.sales) || b.total - a.total,
@@ -437,24 +464,33 @@ function renderList() {
   const cats = [...new Set(items.map((i) => i.category).filter(Boolean))].sort();
   const cs = $('#listCat'), cv = cs.value || 'all';
   cs.innerHTML = opts({ all: '全部類別', ...Object.fromEntries(cats.map((c) => [c, c])) }, cats.includes(cv) ? cv : 'all');
+  calcRec();
   const q = norm($('#listQ').value), f = $('#listFilter').value, c = cs.value;
   const arr = items.filter((i) => (f === 'all' || i.status === f) && (c === 'all' || i.category === c) && (!q || norm(`${i.name} ${i.category} ${i.summary} ${i.note}`).includes(q)))
-    .sort(SORT_FN[$('#listSort').value] || SORT_FN.rate);
+    .sort(SORT_FN[$('#listSort').value] || SORT_FN.rec);
   $('#listCount').textContent = `● 已入選 ${items.filter((i) => i.status !== 'drop').length} 件${arr.length !== items.length ? `（顯示 ${arr.length} 件）` : ''}`;
   $('#scatter').innerHTML = scatter(items.filter((i) => i.status !== 'drop'));
-  $('#listBody').innerHTML = arr.length ? arr.map(cardItem).join('') : `<p class="empty">${items.length ? '沒有符合條件的商品。' : '還沒有商品。用上方「AI 找商品」自動搜尋，或到「<a href="#score">評分</a>」手動加入。'}</p>`;
+  if (!arr.length) { $('#listBody').innerHTML = `<p class="empty">${items.length ? '沒有符合條件的商品。' : '還沒有商品。用上方「AI 找商品」自動搜尋，或到「<a href="#score">評分</a>」手動加入。'}</p>`; return; }
+  if ($('#listView').value === 'cat') {
+    const groups = {};
+    for (const i of arr) (groups[i.category || '未分類'] ??= []).push(i);
+    const order = Object.keys(groups).sort((a, b) => (a === '其他') - (b === '其他') || groups[b].length - groups[a].length);
+    $('#listBody').innerHTML = order.map((g) => `<h2 class="cat-h"><span class="cat ${catClass(g)}">${esc(g)}</span> 排行 <span class="muted sm">${groups[g].length} 件</span></h2><div class="cards">${groups[g].map(cardItem).join('')}</div>`).join('');
+  } else {
+    $('#listBody').innerHTML = `<div class="cards">${arr.map(cardItem).join('')}</div>`;
+  }
 }
-function cardItem(i) {
+function cardItem(i, idx) {
   const rate = num(i.base) + num(i.xtra), r = num(i.rating), a = i.actual || {}, u = safeUrl(i.url), id = esc(i.id);
   const stars = r ? `<span class="stars" aria-hidden="true">${'★'.repeat(Math.round(r))}${'☆'.repeat(5 - Math.round(r))}</span> <span aria-label="評分 ${r}">${r}</span>` : '';
   const trend = i.trend === '上升' ? '<span class="up">↗ 上升</span>' : i.trend === '下降' ? '<span class="down">↘ 下降</span>' : i.trend ? `<span class="muted">→ ${esc(i.trend)}</span>` : '';
   return `<article class="pc">
-    <div class="pc-top"><span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span><span class="prate${rate ? '' : ' unk'}">${rate ? `${fmt(rate, 1).replace(/\.0$/, '')}% 分潤` : '分潤未知'}</span></div>
+    <div class="pc-top"><span><span class="rk${idx < 3 ? ' top' : ''}">#${idx + 1}</span> <span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="prate${rate ? '' : ' unk'}">${rate ? `${fmt(rate, 1).replace(/\.0$/, '')}% 分潤` : '分潤未知'}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : '<span class="muted">價格未知</span>'}${num(i.discount) ? `<span class="disc">-${fmt(num(i.discount))}%</span>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
     ${stars || trend ? `<div class="pc-row"><span>${stars}</span>${trend}</div>` : ''}
     ${i.summary ? `<p class="sum">${esc(i.summary)}</p>` : ''}
-    <div class="pc-row sm"><span><span class="grade g${i.grade}">${i.grade}</span> ${fmt(i.total, 1)} 分｜單筆約 ${fmt(expOf(i), 1)} 元</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
+    <div class="pc-row sm"><span>推薦指數 <b>${recMap[i.id] ?? '—'}</b>｜<span class="grade g${i.grade}">${i.grade}</span> ${fmt(i.total, 1)} 分｜單筆約 ${fmt(expOf(i), 1)} 元</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
     ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觀看／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
     <select data-act="status" data-id="${id}" aria-label="${esc(i.name)} 狀態">${opts(STATUS, i.status)}</select>
@@ -678,6 +714,11 @@ const ACT = {
     save.i(); disc = []; renderDisc(); renderList(); toast(`已加入 ${pick.length} 件商品，狀態為「觀望中」`);
   },
   discClear() { disc = []; renderDisc(); },
+  autoCatAll() {
+    let n = 0;
+    for (const i of items) { const c = autoCat(i.name, i.category); if (c !== i.category && (c !== '其他' || !i.category)) { i.category = c; n++; } }
+    save.i(); renderList(); toast(n ? `已自動分類 ${n} 件商品` : '所有商品都已有分類');
+  },
   discAll(b) { $$('[data-dc]').forEach((x) => { if (!x.disabled) x.checked = !!b.dataset.v; }); },
   copyBm() { copy(bmCode()); },
   fillPlan() { const t = items.filter((i) => ACTIVE.includes(i.status)).sort((a, b) => b.total - a.total).slice(0, 20); $('#fPlan').elements.products.value = t.map((i) => i.name).join('\n'); if (!t.length) toast('清單沒有可用的商品'); },
@@ -762,7 +803,7 @@ document.addEventListener('change', async (e) => {
     catch (err) { showErr(el, err); }
     t.value = '';
   } else if (t.id === 'rkDate' && t.value) { rk.date = t.value; renderRank(); }
-  else if (['listFilter', 'listCat', 'listSort'].includes(t.id)) renderList();
+  else if (['listFilter', 'listCat', 'listSort', 'listView'].includes(t.id)) renderList();
   else if (t.id === 'aiSrc') aiSrc = t.value;
 });
 document.addEventListener('input', (e) => {
@@ -893,7 +934,8 @@ $$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS,
 $$('select[data-opt="source"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'reels'); });
 $$('select[data-opt="platformAll"]').forEach((s) => { s.innerHTML = opts({ all: '全部平台', ...PLATFORMS }, 'all'); });
 $('#listFilter').innerHTML = opts({ all: '全部狀態', ...STATUS }, 'all');
-$('#listSort').innerHTML = opts(SORTS, 'rate');
+$('#listSort').innerHTML = opts(SORTS, 'rec');
+$('#listView').innerHTML = opts({ all: '綜合排行', cat: '分類排行' }, 'all');
 $$('select[data-opt="format"]').forEach((s) => { s.innerHTML = FORMATS.map((f) => `<option>${esc(f)}</option>`).join(''); });
 $('#sliders').innerHTML = USER_DIMS.map((d) => `<fieldset class="seg"><legend>${esc(d.n)} <span class="w" data-w="${d.k}"></span></legend><p class="hint">${esc(d.q)}</p>
   <div class="segs">${[1, 2, 3, 4, 5].map((i) => `<label><input type="radio" name="s_${d.k}" value="${i}" aria-label="${esc(d.n)} ${i} 分"><span>${i}</span></label>`).join('')}</div>

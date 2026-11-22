@@ -213,15 +213,18 @@
     <select id="listCat" aria-label="類別"></select>
     <select id="listFilter" aria-label="狀態"></select>
     <select id="listSort" aria-label="排序"></select>
+    <select id="listView" aria-label="顯示方式"></select>
   </div>
   <div class="toolbar">
     <span id="listCount" class="tag"></span>
     <span class="grow"></span>
+    <button type="button" data-act="autoCatAll">自動分類</button>
     <button type="button" data-act="expItems">匯出 CSV</button>
     <label class="btn">匯入 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="items"></label>
   </div>
   <details class="card"><summary>分數 × 佣金散佈圖</summary><div id="scatter"></div></details>
-  <div id="listBody" class="cards"></div>
+  <p class="hint">推薦指數＝系統分數 50%＋單筆佣金 30%＋銷量 20%（與清單中最高者相比）。分類依商品名稱關鍵字自動判斷，分錯可按「編輯」修改。</p>
+  <div id="listBody"></div>
 </section>
 
 <!-- M10 商品排行榜 -->
