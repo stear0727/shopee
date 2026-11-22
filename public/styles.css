@@ -1,10 +1,12 @@
 :root{
+  --brand:#c62938;--brand2:#3e3e3e;
   --bg:#faf7f4;--card:#fff;--fg:#1f1a17;--mut:#625a53;--line:#e6ddd5;--acc:#c2410c;--onacc:#fff;--accbg:#fff1e8;
   --ok:#15803d;--warn:#a15c07;--bad:#b91c1c;--gS:#c2410c;--gA:#a16207;--gB:#1d4ed8;--gC:#57534e;
   --c0:#c2410c;--c1:#1d4ed8;--c2:#15803d;--c3:#7e22ce;--c4:#a16207;--c5:#be185d;--c6:#57534e;
   color-scheme:light dark;
 }
 @media (prefers-color-scheme:dark){:root{
+  --brand:#f0566a;--brand2:#ece6e1;
   --bg:#161210;--card:#211c19;--fg:#f3ece6;--mut:#b5a99f;--line:#3b332d;--acc:#fb923c;--onacc:#1a1410;--accbg:#3a2417;
   --ok:#4ade80;--warn:#fbbf24;--bad:#f87171;--gS:#fb923c;--gA:#facc15;--gB:#60a5fa;--gC:#a8a29e;
   --c0:#fb923c;--c1:#60a5fa;--c2:#4ade80;--c3:#c084fc;--c4:#facc15;--c5:#f472b6;--c6:#a8a29e;
@@ -21,7 +23,9 @@ h2{font-size:1.15rem;margin:.2em 0 .6em}h3{font-size:1rem;margin:1em 0 .4em}
 
 /* layout */
 .top{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--card);border-bottom:1px solid var(--line)}
-.brand{font-weight:700;font-size:1.1rem;color:var(--fg);text-decoration:none}
+.brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:1.2rem;letter-spacing:.2px;color:var(--fg);text-decoration:none}
+.brand img{width:34px;height:34px;display:block}
+.brand-name .b1{color:var(--brand)}.brand-name .b2{color:var(--brand2)}
 .badge-off{font-size:.75rem;color:var(--mut);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
 .topnav{margin-left:auto;display:flex;gap:4px}
 .topnav a{display:flex;align-items:center;min-height:44px;padding:0 12px;border-radius:10px;text-decoration:none;color:var(--fg)}
@@ -217,7 +221,8 @@ a.btn{text-decoration:none}
 .tag.pubtag{background:var(--ok);border-color:var(--ok);color:var(--card);font-weight:700}
 .save-bar{align-items:center;margin:0 0 16px}
 .pc-row.comm b{color:var(--acc);font-size:1.05rem}
-.sync-top{margin-left:auto;font-size:.8125rem;color:var(--mut);text-decoration:none;white-space:nowrap}
+.sync-top{margin-left:auto;min-height:36px;padding:0 10px;font-size:.8125rem;color:var(--mut);background:transparent;border:1px solid transparent;border-radius:99px;white-space:nowrap}
+.sync-top:hover{border-color:var(--line);color:var(--fg)}
 .sync-status.err{color:var(--bad)}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}

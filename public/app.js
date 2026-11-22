@@ -591,6 +591,8 @@ async function syncNow(retry = 0) {
 }
 const scheduleSync = (ms = 2500) => { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms); };
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && Date.now() - lastPull > 15000) syncNow(); });
+// 網頁開著時每 60 秒自動同步一次（只在畫面可見時），另一台裝置的修改會自動出現
+setInterval(() => { if (document.visibilityState === 'visible' && !syncing && Date.now() - lastPull > 55000) syncNow(); }, 60000);
 
 /* ========== 事件 ========== */
 const go = (h) => { if (location.hash === h) route(); else location.hash = h; };

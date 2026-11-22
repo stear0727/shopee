@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>分潤選品分析</title>
-<meta name="description" content="匯入蝦皮分潤商品、分析排行並用 AI 生成社群貼文文案（非蝦皮官方）">
-<meta name="theme-color" content="#c2410c">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
+<title>Tomatopick｜蝦皮分潤選品分析</title>
+<meta name="description" content="Tomatopick：匯入蝦皮分潤商品、分析排行並用 AI 生成社群貼文文案（非蝦皮官方）">
+<meta name="theme-color" content="#c62938">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 <script src="app.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">跳到主要內容</a>
 <header class="top">
-  <a class="brand" href="#list">選品分析</a>
+  <a class="brand" href="#list" aria-label="Tomatopick 首頁"><img src="logo-mark.png" alt="" width="34" height="34"><span class="brand-name"><span class="b1">Tomato</span><span class="b2">pick</span></span></a>
   <span class="badge-off">非蝦皮官方</span>
-  <a class="sync-status sync-top" href="#settings" title="雲端同步狀態"></a>
+  <button type="button" class="sync-status sync-top" data-act="syncNow" title="點一下立即同步"></button>
 </header>
 
 <nav class="side" aria-label="主要導覽">
@@ -75,7 +76,7 @@
   <div class="card">
     <h2>雲端同步（電腦與手機互通）</h2>
     <p>狀態：<span class="sync-status"></span></p>
-    <p class="hint">打開網站、修改資料後幾秒、以及切回網頁時都會自動同步。兩台裝置都改過時逐件合併，同一件商品以最後修改的為準；在一台刪除的商品，另一台也會刪除。存取碼與自備金鑰不會同步。</p>
+    <p class="hint">打開網站、修改資料後幾秒、切回網頁時，以及網頁開著時每 60 秒都會自動同步；也可以點右上角的同步狀態立即同步。兩台裝置都改過時逐件合併，同一件商品以最後修改的為準；在一台刪除的商品，另一台也會刪除。存取碼與自備金鑰不會同步。</p>
     <div class="btns"><button type="button" data-act="syncNow">立即同步</button></div>
   </div>
   <div class="card"><h2>連線狀態</h2><p id="connStatus">檢查中…</p><div class="btns"><button type="button" data-act="checkConn">重新檢查</button></div></div>
