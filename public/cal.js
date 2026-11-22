@@ -10,6 +10,7 @@ const CAL_DEF = { minG: 'A', fill: 'auto', perDay: 3, cool: 21, catCap: 40, pre:
 const CS = () => {
   const o = { ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } };
   if (!Array.isArray(o.days) || !o.days.length) o.days = CAL_DEF.days;
+  for (const k of ['cool', 'catCap', 'pre', 'w']) o[k] = CAL_DEF[k];   // 這些固定用預設值，不提供設定
   if (!(S.cal && S.cal.perDay) && S.cal && S.cal.perWeek) o.perDay = Math.ceil(S.cal.perWeek / o.days.length);
   o.perDay = clamp(Math.round(num(o.perDay)) || 3, 1, 10);
   o.perWeek = o.perDay * o.days.length;
@@ -312,7 +313,6 @@ function eventsHtml() {
     <div class="btns"><button type="button" class="pri" data-act="evEdit">＋ 新增檔期</button></div></div>`;
 }
 function setHtml(c) {
-  const n = (k, l, min, max, unit = '') => `<label>${l}<input type="number" data-cs="${k}" min="${min}" max="${max}" step="1" inputmode="numeric" value="${esc(c[k])}">${unit ? `<small class="hint">${min}–${max}${unit}</small>` : ''}</label>`;
   return `<div class="card"><h2>發文日與篇數</h2>
     <fieldset class="days"><legend>要在星期幾發文</legend>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="chk"><input type="checkbox" data-csday="${d}"${c.days.includes(d) ? ' checked' : ''}>週${WD[d]}</label>`).join('')}</fieldset>
     <div class="row2"><label>每天發幾篇<input type="number" data-cs="perDay" min="1" max="10" step="1" inputmode="numeric" value="${esc(c.perDay)}"><small class="hint">1–10 篇</small></label><p class="hint" id="perWeekInfo">每週共 ${c.perWeek} 篇（${c.days.length} 天 × ${c.perDay} 篇）</p></div>
@@ -320,13 +320,8 @@ function setHtml(c) {
     <div class="card"><h2>排程設定</h2><div class="row2">
     <label>最低入選等級<select data-cs="minG">${['S', 'A', 'B'].map((g) => `<option value="${g}"${c.minG === g ? ' selected' : ''}>${g} 級以上</option>`).join('')}</select></label>
     <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動依序補入下一等級（S→A→B）</option></select></label>
-    ${n('cool', '冷卻期（優先避開近期排過的商品）', 7, 60, ' 天')}${n('catCap', '同一類別週上限 %', 20, 100, '%')}
-    ${n('pre', '檔期提前預熱天數', 3, 14, ' 天')}</div>
-    <fieldset><legend>排程優先分權重（商品總分／熱度／檔期，會自動換算成合計 1）</legend><div class="row3">
-      <label>商品總分<input type="number" data-csw="s" min="0" max="1" step="0.05" value="${esc(c.w.s)}"></label>
-      <label>熱度<input type="number" data-csw="h" min="0" max="1" step="0.05" value="${esc(c.w.h)}"></label>
-      <label>檔期<input type="number" data-csw="c" min="0" max="1" step="0.05" value="${esc(c.w.c)}"></label></div></fieldset>
-    <p class="hint">熱度分＝月銷在全部商品中的排名（0–100），與上次匯入相比銷量上升加 15、下降減 15。排程優先分是選品依據，不是成交預測。</p>
+    </div>
+    <p class="hint">候選不足時選「自動依序補入」：入選等級的商品不夠，會依序補入下一等級（最多到 B 級），卡片標示「補位」。</p>
     <div class="btns"><button type="button" class="pri" data-act="calSaveSet">儲存排程設定</button><button type="button" class="ghost" data-act="calResetSet">恢復預設</button><span id="calSetMsg" class="hint"></span></div></div>`;
 }
 
@@ -438,11 +433,9 @@ Object.assign(ACT, {
   evEdit(b) { evEdit(b.dataset.id || ''); },
   evDel(b) { const e = (S.events || []).find((x) => x.id === b.dataset.id); if (e && confirm(`確定刪除檔期「${e.name}」？`)) { S.events = S.events.filter((x) => x.id !== e.id); save.s(); renderCal(); } },
   calSaveSet() {
-    const v = (k) => num($(`[data-cs="${k}"]`).value), w = Object.fromEntries(['s', 'h', 'c'].map((k) => [k, clamp(num($(`[data-csw="${k}"]`).value), 0, 1)]));
-    const ws = w.s + w.h + w.c; if (!ws) { toast('三項權重不能都是 0'); return; }
     const days = $$('[data-csday]').filter((e) => e.checked).map((e) => Number(e.dataset.csday));
     if (!days.length) { toast('至少選一個發文日'); return; }
-    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(v('perDay')) || 3, 1, 10), cool: clamp(Math.round(v('cool')), 7, 60), catCap: clamp(Math.round(v('catCap')), 20, 100), pre: clamp(Math.round(v('pre')), 3, 14), days, w: { s: Math.round(w.s / ws * 100) / 100, h: Math.round(w.h / ws * 100) / 100, c: Math.round(w.c / ws * 100) / 100 } };
+    S.cal = { minG: $('[data-cs="minG"]').value, fill: $('[data-cs="fill"]').value, perDay: clamp(Math.round(num($('[data-cs="perDay"]').value)) || 3, 1, 10), days };
     S.calGen = {};   // 設定改了：之後打開各週時重新排（只換掉還沒確定的建議）
     save.s(); renderCal(); $('#calSetMsg').textContent = `已儲存（${fmtDT(new Date().toISOString())}），還沒確定排定的建議會依新設定重新排。`;
   },
