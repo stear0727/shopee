@@ -14,7 +14,7 @@ const CS = () => {
   o.perWeek = o.perDay * o.days.length;
   return o;
 };
-const GEN_V = 4;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
+const GEN_V = 5;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
 const GR = { S: 0, A: 1, B: 2, C: 3 }, GL = ['S', 'A', 'B', 'C'];
 const PST = { sug: '建議', set: '已排定', done: '已發布' };
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
@@ -58,6 +58,8 @@ function weekSlots(ws, c) {
   return s.filter((d) => d >= today());   // 只排你選的發文日，且不排到已經過去的日子
 }
 // 候選商品＋排程優先分 P = (wS×總分 + wH×熱度 + wC×檔期) ÷ 權重合計
+// 已經處理過的商品（產生過文案或在發布清單手動發布過），日曆不再推薦；日曆是先排時間、之後才產生文案
+const handled = (i) => !!i.aiText || i.status === 'done';
 // 冷卻期：近 N 天內排過、發過，或已經排在之後的週
 const isBusy = (i, ws, c) => { const coolFrom = addD(ws, -c.cool); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d > coolFrom) || !!(i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom); };
 const skipped = (i, ws) => !!(i.calSkip && i.calSkip >= ws);   // 在日曆刪除的建議，那一週不再排入
@@ -67,7 +69,7 @@ const inWeekOf = (i, ws) => { const we = addD(ws, 6); return (Array.isArray(i.pl
 function scoreCands(ws, slots, grades, c, H, except = new Set(), cool = false) {
   const W = c.w, wsum = (W.s + W.h + W.c) || 1;
   const busy = (i) => (cool ? inWeekOf(i, ws) : isBusy(i, ws, c)) || skipped(i, ws);
-  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && !INQ(i) && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
+  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && !INQ(i) && !handled(i) && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
     .map((i) => {
       let ev = null, evD = '';
       for (const d of slots) { const e = evOf(i, d, c); if (e) { ev = e; evD = d; break; } }   // 檔期商品排在最早可預熱的發文日
@@ -123,18 +125,6 @@ function nextFill(ws, we, c) {
   const g = Math.max(GR[c.minG], ...used) + 1;
   return g <= GR.B ? GL[g] : '';
 }
-// 文案的「建議發文時段」換算成具體時間：依當天是平日或週末挑對應的那一段，例如「平日晚上 8–10 點」→ 20:00
-function timeFromBest(txt, d) {
-  txt = String(txt || ''); if (!txt) return '';
-  const wkend = [0, 6].includes(pd(d).getDay()), segs = txt.split(/[；;。\n]/).filter((x) => x.trim());
-  const seg = segs.find((x) => (wkend ? /週末|假日|周末|星期[六日天]|週[六日]/ : /平日|週間|上班日|工作日|週[一二三四五]/).test(x)) || segs.find((x) => !(wkend ? /平日|週間|上班日|工作日/ : /週末|假日|周末/).test(x)) || segs[0] || '';
-  const m = seg.match(/(凌晨|清晨|早上|上午|中午|午休|午餐|下午|傍晚|晚上|晚間|夜間|深夜|睡前)?\s*(\d{1,2})\s*(?:[:：]\s*(\d{2})|點(?:\s*(\d{1,2})\s*分|半)?)?/);
-  if (!m) return '';
-  let h = Number(m[2]); const mi = m[3] ? Number(m[3]) : m[4] ? Number(m[4]) : /點半/.test(m[0]) ? 30 : 0;
-  if (/下午|傍晚|晚上|晚間|夜間|深夜|睡前/.test(m[1] || '') && h < 12) h += 12;
-  if (/中午|午休|午餐/.test(m[1] || '') && h < 6) h += 12;
-  return h <= 23 && mi <= 59 ? `${pad2(h)}:${pad2(mi)}` : '';
-}
 const prioOf = (i, d, H = heatMap()) => { const c = CS(), ev = evOf(i, d, c), W = c.w, ws = (W.s + W.h + W.c) || 1; return { P: Math.round(((W.s * num(i.total) + W.h * (H[i.id] ?? 0) + W.c * (ev ? 100 : 0)) / ws) * 10) / 10, ev }; };
 // 整理日曆上的排程（舊資料轉換＋自動帶入時間），回傳是否有變動
 const AUTO_R = /^(從發布清單加入|已發布)$/;   // 舊版跟發布清單連動時自動建立、現已不需要的排程
@@ -146,13 +136,10 @@ function calReconcile() {
       if (p.st === 'make') { p.st = 'set'; ch = true; } else if (p.st === 'perf') { p.st = 'done'; ch = true; }
     }
     const n0 = i.plans.length; i.plans = i.plans.filter((p) => PST[p.st] && !(p.man && AUTO_R.test(p.r || ''))); if (i.plans.length !== n0) ch = true;
-    // 還沒有時間的排程：依 AI 文案的建議發文時段自動帶入
-    const bt = typeof bestTimeOf === 'function' ? bestTimeOf(i) : '';
-    if (bt) for (const p of i.plans) if (isOpen(p) && !p.t) { const t = timeFromBest(bt, p.d); if (t) { p.t = t; p.tw = '依 AI 文案建議時段'; ch = true; } }
   }
   return ch;
 }
-// AI 排程：系統選好這週要推的商品後，由 AI 從你選的發文日挑日期與時間（一週一次呼叫）。
+// AI 排程：系統選好這週要推的商品後，由 AI 依商品類別的目標族群，從你選的發文日挑日期與時間（一週一次呼叫）。
 // 只排「建議」卡片，且不動你手動改過日期或時間的；AI 無法使用時保留系統排的日期。
 const calAIBusy = new Set();
 async function calAIPlan(ws, btn = null, auto = false) {
@@ -164,7 +151,7 @@ async function calAIPlan(ws, btn = null, auto = false) {
   allPlans().forEach(({ p }) => { if (p.d >= ws && p.d <= we && !ids.has(p.id)) used[p.d] = (used[p.d] || 0) + 1; });
   calAIBusy.add(ws);
   try {
-    const items_ = list.slice(0, 40).map(({ p, i }) => { const e = slots.map((d) => evOf(i, d, c)).find(Boolean); return { id: p.id, name: i.name, category: i.category, price: num(i.price), event: e ? e.name : '', evFrom: e ? addD(e.start, -c.pre) : '', bestTime: typeof bestTimeOf === 'function' ? bestTimeOf(i).slice(0, 200) : '' }; });
+    const items_ = list.slice(0, 40).map(({ p, i }) => { const e = slots.map((d) => evOf(i, d, c)).find(Boolean); return { id: p.id, name: i.name, category: i.category, price: num(i.price), event: e ? e.name : '', evFrom: e ? addD(e.start, -c.pre) : '' }; });
     const j = await ai('schedule', { items: items_, perDay: c.perDay, dates: slots.map((d) => ({ date: d, weekday: WD[pd(d).getDay()], used: used[d] || 0 })) }, btn);
     let n = 0; const cnt = { ...used };
     for (const r of (j.json && Array.isArray(j.json.plans) ? j.json.plans : [])) {
@@ -219,12 +206,12 @@ const jumpBtn = ({ p, i }) => `<button type="button" class="link" data-act="calJ
 function shortWhy(ws, c) {
   const we = addD(ws, 6), gs = GL.slice(0, (c.fill === 'auto' ? GR.B : GR[c.minG]) + 1);
   const inWeek = new Set(allPlans().filter(({ p }) => p.d >= ws && p.d <= we).map(({ i }) => i.id));
-  const n = { low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
+  const n = { done: 0, low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
   for (const i of items) {
     if (i.status === 'drop' || inWeek.has(i.id)) continue;
-    if (INQ(i)) n.list++; else if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; 
+    if (INQ(i)) n.list++; else if (handled(i)) n.done++; else if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; 
   }
-  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`], [n.list, `已在發布清單（手動）${n.list} 件`]].filter(([k]) => k).map(([, v]) => v);
+  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`], [n.list, `已在發布清單（手動）${n.list} 件`], [n.done, `已產生過文案或已發布 ${n.done} 件`]].filter(([k]) => k).map(([, v]) => v);
   return t.length ? t.join('、') : '符合條件的商品都已經排進這週了';
 }
 function alertsHtml(ws, we, c) {
@@ -287,7 +274,7 @@ function agendaHtml(d) {
   return `<section class="agenda" aria-label="當天排程">
     <div class="ag-head"><h2>${dd.getMonth() + 1} 月 ${dd.getDate()} 日（${WD[dd.getDay()]}）${d === today() ? ' <span class="tag">今天</span>' : ''}</h2><button type="button" data-act="calAdd" data-d="${d}">＋ 新增</button></div>
     ${list.length ? list.map(agItem).join('') : `<p class="empty">這天沒有排程${CS().days.includes(dd.getDay()) ? '' : '（不是預設發文日）'}。</p>`}
-    <p class="hint">日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開。確定排定後可在這裡產生文案、發文後按「標記已發布」。建議的日期與時間由 AI 排定（有 AI 文案的依文案建議時段），手動改過的不會再被 AI 移動；電腦版可把下方項目拖到月曆上的其他日期。</p>
+    <p class="hint">日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開。先排好時間、確定排定後，再在這裡產生文案，發文後按「標記已發布」。建議的日期與時間由 AI 排定，手動改過的不會再被 AI 移動；電腦版可把下方項目拖到月曆上的其他日期。</p>
   </section>`;
 }
 function agItem({ p, i }) {
@@ -351,10 +338,10 @@ function setHtml(c) {
 // 管理時間：只改排定日期與發文時間
 function calTime(pid) {
   const f0 = findPlan(pid); if (!f0) return;
-  const { p, i } = f0, d = $('#dlg'), bt = typeof bestTimeOf === 'function' ? bestTimeOf(i) : '';
+  const { p, i } = f0, d = $('#dlg');
   d.innerHTML = `<form method="dialog" id="fTime"><h2>${esc(i.name)}</h2>
     <div class="row2"><label>發文日期<input name="d" type="date" required value="${esc(p.d)}"></label><label>發文時間<input name="t" type="time" value="${esc(p.t || '')}"></label></div>
-    ${bt ? `<p class="hint">AI 文案建議時段：${esc(bt)}</p>` : '<p class="hint">這件商品還沒有 AI 文案；可以在日曆按「AI 重新排程」，或產生文案後依建議時段帶入時間。</p>'}
+    <p class="hint">改了日期或時間後，「AI 重新排程」不會再移動這則。</p>
     <div class="btns"><button value="cancel" formnovalidate class="ghost">取消</button><button value="ok" class="pri">儲存</button></div></form>`;
   d.returnValue = '';
   d.onclose = () => {
