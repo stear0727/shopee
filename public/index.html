@@ -18,16 +18,17 @@
 </header>
 
 <nav class="side" aria-label="主要導覽">
-  <a href="#list" data-v="list">商品</a>
-  <a href="#pub" data-v="pub">發布</a>
-  <a href="#settings" data-v="settings">設定</a>
+  <button type="button" class="nav-toggle" data-act="navToggle" aria-label="收合選單" aria-expanded="true" title="收合選單"><span aria-hidden="true">«</span></button>
+  <a href="#list" data-v="list" title="商品分析"><span class="ic" aria-hidden="true">📦</span><span class="lb">商品分析</span></a>
+  <a href="#pub" data-v="pub" title="發布清單"><span class="ic" aria-hidden="true">📝</span><span class="lb">發布清單</span></a>
+  <a href="#settings" data-v="settings" title="設定"><span class="ic" aria-hidden="true">⚙️</span><span class="lb">設定</span></a>
 </nav>
 
 <main id="main">
 
 <!-- 商品：匯入＋分析排行 -->
 <section id="v-list" class="view">
-  <h1 tabindex="-1">蝦皮商品</h1>
+  <h1 tabindex="-1">商品分析</h1>
   <div class="card">
     <h2>匯入蝦皮商品檔（CSV／Excel）</h2>
     <p class="hint">在蝦皮分潤後台用「批量取得商品連結」匯出檔案後選檔匯入，可一次選多個檔案。支援 .csv 與 .xlsx（用 Excel 開過再存檔也可以）。會自動分類並保留推廣連結；重複匯入同一商品只更新價格與銷量，不會蓋掉你改過的狀態與文案。</p>

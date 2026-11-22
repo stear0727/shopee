@@ -559,6 +559,7 @@ const ACT = {
     d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
+  navToggle() { setNavMini(!document.body.classList.contains('nav-mini')); },
   showFest(b) {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
     const fp = i.aiData?.json?.festivalPost, post = fp && typeof fp.post === 'string' ? fp.post.trim() : '';
@@ -696,5 +697,12 @@ $$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS,
 $$('select[data-opt="format"]').forEach((s) => { s.innerHTML = FORMATS.map((f) => `<option>${esc(f)}</option>`).join(''); });
 $('#listSort').innerHTML = opts(SORTS, 'rec');
 items.forEach(rescore); save.i();
+// 左側選單收合（電腦版），狀態記在本機
+function setNavMini(on) {
+  document.body.classList.toggle('nav-mini', on);
+  const b = $('.nav-toggle'); if (b) { b.setAttribute('aria-expanded', String(!on)); b.title = on ? '展開選單' : '收合選單'; b.setAttribute('aria-label', b.title); b.firstElementChild.textContent = on ? '»' : '«'; }
+  store.set('navMini', on);
+}
+setNavMini(!!store.get('navMini', false));
 window.addEventListener('hashchange', route);
 route();
