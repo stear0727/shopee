@@ -78,10 +78,6 @@
           <label>價格（元）<input name="price" type="number" inputmode="decimal" min="0" step="1"></label>
         </div>
         <div class="row2">
-          <label>基本佣金率 %<input name="base" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
-          <label>加碼佣金率 %<input name="xtra" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
-        </div>
-        <div class="row2">
           <label>平台<select name="platform" data-opt="platform"></select></label>
           <label>形式<select name="format" data-opt="format"></select></label>
         </div>
@@ -196,20 +192,11 @@
     </form>
     <div id="discOut" aria-live="polite"></div>
   </div>
-  <details class="card" id="bmCard">
-    <summary>從蝦皮分潤後台擷取（真實分潤比例）</summary>
-    <ol class="steps">
-      <li><b>電腦：</b>把右邊按鈕<b>拖曳</b>到瀏覽器的書籤列（看不到書籤列請按 <code>Ctrl + Shift + B</code>）：<a id="bmLink" class="btn pri" href="#list" draggable="true">📥 蝦皮擷取</a></li>
-      <li><b>手機：</b>按 <button type="button" data-act="copyBm">複製書籤程式碼</button>，隨便把一個網頁加入書籤，再編輯該書籤，把網址整個換成剛複製的內容、名稱改成「蝦皮擷取」。</li>
-      <li>用瀏覽器打開 <a href="https://affiliate.shopee.tw/" target="_blank" rel="noopener noreferrer">蝦皮分潤後台</a> 並<b>自己登入</b>，進到商品列表。</li>
-      <li>點書籤「蝦皮擷取」（手機在網址列輸入「蝦皮擷取」再點選書籤），右下角會出現擷取面板。</li>
-      <li>在列表頁等商品載入完，按面板的「<b>擷取這一頁</b>」，只會加入目前畫面上的商品；換頁後想要再按一次，不按就不會收錄。</li>
-      <li>要取得<b>分潤比例</b>，手動點進商品詳情頁，會<b>自動讀取</b>（開新分頁的話，在新分頁再點一次書籤）。面板會顯示「有分潤 N 件」。</li>
-      <li>按面板的「送到選品網站」，會開回本網站，勾選要的商品加入；已在清單中的商品會自動更新分潤。</li>
-      <li>擷取結果會自動保存，重新整理後再點書籤可接續。不用時按面板的「<b>停止擷取</b>」，按「清空」可刪除已擷取的資料。</li>
-    </ol>
-    <p class="hint">書籤只讀取你的瀏覽器本來就收到的商品資料，不會自動點擊或發送請求，也不會讀取帳號密碼。仍無法保證符合蝦皮使用條款，請自行評估。</p>
-  </details>
+  <div class="card">
+    <h2>匯入蝦皮商品檔（CSV／Excel）</h2>
+    <p class="hint">在蝦皮分潤後台用「批量取得商品連結」匯出檔案，直接選檔匯入。支援 .csv 與 .xlsx（用 Excel 開過再存檔也可以）。會自動分類，並保留推廣連結方便發文；重複匯入同一商品只更新價格與銷量，不會蓋掉你改過的狀態與文案。</p>
+    <label class="btn pri">選擇蝦皮匯出的檔案<input class="vh" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-imp="items"></label>
+  </div>
   <div class="filters">
     <input id="listQ" type="search" placeholder="搜尋商品名稱、分類、摘要" aria-label="搜尋商品">
     <select id="listCat" aria-label="類別"></select>
@@ -222,10 +209,9 @@
     <span class="grow"></span>
     <button type="button" data-act="autoCatAll">自動分類</button>
     <button type="button" data-act="expItems">匯出 CSV</button>
-    <label class="btn">匯入 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="items"></label>
+    <label class="btn">匯入檔案<input class="vh" type="file" accept=".csv,.xlsx,text/csv" data-imp="items"></label>
   </div>
-  <details class="card"><summary>分數 × 佣金散佈圖</summary><div id="scatter"></div></details>
-  <p class="hint">推薦指數＝系統分數 50%＋單筆佣金 30%＋銷量 20%（與清單中最高者相比）。分類依商品名稱關鍵字自動判斷，分錯可按「編輯」修改。</p>
+  <p class="hint">推薦指數＝系統分數 60%＋銷量 40%（銷量與清單中最高者相比）。分類依商品名稱關鍵字自動判斷，分錯可按「編輯」修改。</p>
   <div id="listBody"></div>
 </section>
 
