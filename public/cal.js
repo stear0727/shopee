@@ -1,7 +1,8 @@
 /* ========== M11 內容日曆 ==========
  * 只建議、不發布：依商品評分、熱度與檔期排出每週建議發文清單，發布一律由使用者手動完成。
  * 每則排程存在商品的 plans 陣列裡，跟著商品一起雲端同步。
- * 日曆與發布清單分開：發布清單是你手動加入的商品；日曆只放依 AI 推薦日期排出的商品，在日曆上確定排定、產生文案、標記已發布。
+ * 日曆與發布清單完全獨立：日曆從「商品分析」的全部商品挑選並由 AI 排日期時間，不看發布清單；發布清單是手動加入、手動發布的功能。
+ * 在日曆上確定排定、產生文案、標記已發布。
  * plan = { id, d: 排定日期, t: 發文時間 HH:MM, tw: 時間來源, st: sug|set|done, p: 排程優先分, g: 入選等級, r: 入選原因, fill: 補位, m: 手動改過, man: 手動新增, at: 發布時間 }
  */
 const CAL_DEF = { minG: 'A', fill: 'auto', perDay: 3, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
@@ -25,7 +26,7 @@ const diffD = (a, b) => Math.round((pd(a) - pd(b)) / 864e5);
 const wkStart = (s) => addD(s, -((pd(s).getDay() + 6) % 7));   // 週一為一週的開始
 const fmtMD = (s) => { const d = pd(s); return `${d.getMonth() + 1}/${d.getDate()}（${WD[d.getDay()]}）`; };
 const isOpen = (p) => p.st === 'sug' || p.st === 'set';
-const overdue = (p) => p.st === 'set' && p.d < today();   // 已排定但日期已過、還沒在發布清單標記已發布
+const overdue = (p) => p.st === 'set' && p.d < today();   // 已排定但日期已過、還沒標記已發布
 const plansOf = (i) => (Array.isArray(i.plans) ? i.plans : (i.plans = []));
 const allPlans = () => items.flatMap((i) => (Array.isArray(i.plans) ? i.plans.map((p) => ({ p, i })) : []));
 const findPlan = (pid) => allPlans().find(({ p }) => p.id === pid);
@@ -58,10 +59,8 @@ function weekSlots(ws, c) {
   return s.filter((d) => d >= today());   // 只排你選的發文日，且不排到已經過去的日子
 }
 // 候選商品＋排程優先分 P = (wS×總分 + wH×熱度 + wC×檔期) ÷ 權重合計
-// 已經處理過的商品（產生過文案或在發布清單手動發布過），日曆不再推薦；日曆是先排時間、之後才產生文案
-const handled = (i) => !!i.aiText || i.status === 'done';
 // 冷卻期：近 N 天內排過、發過，或已經排在之後的週
-const isBusy = (i, ws, c) => { const coolFrom = addD(ws, -c.cool); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d > coolFrom) || !!(i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom); };
+const isBusy = (i, ws, c) => { const coolFrom = addD(ws, -c.cool); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d > coolFrom); };   // 只看日曆自己的排程，不看發布清單
 const skipped = (i, ws) => !!(i.calSkip && i.calSkip >= ws);   // 在日曆刪除的建議，那一週不再排入
 // 這週的目標則數：剩下的發文日 × 每天篇數
 const weekTarget = (ws, c, slots = weekSlots(ws, c)) => { const we = addD(ws, 6), past = allPlans().filter(({ p }) => p.d >= ws && p.d <= we && p.d < today()).length; return Math.min(c.perWeek, past + slots.length * c.perDay); };
@@ -69,7 +68,7 @@ const inWeekOf = (i, ws) => { const we = addD(ws, 6); return (Array.isArray(i.pl
 function scoreCands(ws, slots, grades, c, H, except = new Set(), cool = false) {
   const W = c.w, wsum = (W.s + W.h + W.c) || 1;
   const busy = (i) => (cool ? inWeekOf(i, ws) : isBusy(i, ws, c)) || skipped(i, ws);
-  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && !INQ(i) && !handled(i) && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
+  return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
     .map((i) => {
       let ev = null, evD = '';
       for (const d of slots) { const e = evOf(i, d, c); if (e) { ev = e; evD = d; break; } }   // 檔期商品排在最早可預熱的發文日
@@ -206,12 +205,12 @@ const jumpBtn = ({ p, i }) => `<button type="button" class="link" data-act="calJ
 function shortWhy(ws, c) {
   const we = addD(ws, 6), gs = GL.slice(0, (c.fill === 'auto' ? GR.B : GR[c.minG]) + 1);
   const inWeek = new Set(allPlans().filter(({ p }) => p.d >= ws && p.d <= we).map(({ i }) => i.id));
-  const n = { done: 0, low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
+  const n = { low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
   for (const i of items) {
     if (i.status === 'drop' || inWeek.has(i.id)) continue;
-    if (INQ(i)) n.list++; else if (handled(i)) n.done++; else if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; 
+    if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; 
   }
-  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`], [n.list, `已在發布清單（手動）${n.list} 件`], [n.done, `已產生過文案或已發布 ${n.done} 件`]].filter(([k]) => k).map(([, v]) => v);
+  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`]].filter(([k]) => k).map(([, v]) => v);
   return t.length ? t.join('、') : '符合條件的商品都已經排進這週了';
 }
 function alertsHtml(ws, we, c) {
@@ -274,7 +273,7 @@ function agendaHtml(d) {
   return `<section class="agenda" aria-label="當天排程">
     <div class="ag-head"><h2>${dd.getMonth() + 1} 月 ${dd.getDate()} 日（${WD[dd.getDay()]}）${d === today() ? ' <span class="tag">今天</span>' : ''}</h2><button type="button" data-act="calAdd" data-d="${d}">＋ 新增</button></div>
     ${list.length ? list.map(agItem).join('') : `<p class="empty">這天沒有排程${CS().days.includes(dd.getDay()) ? '' : '（不是預設發文日）'}。</p>`}
-    <p class="hint">日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開。先排好時間、確定排定後，再在這裡產生文案，發文後按「標記已發布」。建議的日期與時間由 AI 排定，手動改過的不會再被 AI 移動；電腦版可把下方項目拖到月曆上的其他日期。</p>
+    <p class="hint">日曆從「商品分析」的全部商品挑選，跟發布清單無關。先排好時間、確定排定後，再在這裡產生文案，發文後按「標記已發布」。建議的日期與時間由 AI 排定，手動改過的不會再被 AI 移動；電腦版可把下方項目拖到月曆上的其他日期。</p>
   </section>`;
 }
 function agItem({ p, i }) {

@@ -64,7 +64,7 @@
 <!-- 發布清單 -->
 <section id="v-pub" class="view" hidden>
   <h1 tabindex="-1">發布清單</h1>
-  <p class="hint">這裡是你在「商品分析」勾選、手動加入的商品（AI 推薦的排程在「內容日曆」，兩者分開）。按「產生文案」可設定是否加一段節慶活動文案，再由 AI 產生；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
+  <p class="hint">這裡是你在「商品分析」勾選、手動加入並手動發布的商品；跟「內容日曆」是獨立的功能。按「產生文案」可設定是否加一段節慶活動文案，再由 AI 產生；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
   <h2>待發布 <span class="tag" id="pubQueueN">0</span> 已發布 <span class="tag pubtag" id="pubDoneN">0</span></h2>
   <div class="tabs cat-tabs" id="pubChips" role="tablist" aria-label="篩選發布狀態"></div>
   <div class="toolbar">
@@ -80,7 +80,7 @@
 <!-- 內容日曆 -->
 <section id="v-cal" class="view" hidden>
   <h1 tabindex="-1">內容日曆</h1>
-  <p class="hint">依商品評分、熱度與檔期，每週排出建議發文清單（S→A→B 依序排入）。日曆只放 AI 推薦的商品，跟發布清單（你手動加入的商品）分開：在這裡確定排定、產生文案，發文後標記已發布。系統只建議、不發布。</p>
+  <p class="hint">依商品評分、熱度與檔期，每週排出建議發文清單（S→A→B 依序排入）。日曆從「商品分析」的全部商品挑選、由 AI 排日期與時間，跟發布清單（手動加入、手動發布）是獨立的兩個功能：在這裡確定排定、產生文案，發文後標記已發布。系統只建議、不發布。</p>
   <div class="tabs" id="calTabs" role="tablist" aria-label="內容日曆畫面">
     <button type="button" role="tab" data-act="calTab" data-t="month">月曆</button>
     <button type="button" role="tab" data-act="calTab" data-t="list">清單</button>
