@@ -298,12 +298,18 @@ function importShopee(rows) {
     vals.push({ price, sales: num(sales), comm: commOf({ price, base: rate }) });
     const old = items.find((i) => (id && i.id === id) || (pid && (String(i.url).match(/(\d+)$/) || [])[1] === pid) || keyOf(i.name) === keyOf(name));
     if (old) {
+      // 與上次匯入比較：價格上漲 10% 以上、分潤率下降 → 風險標記；銷量變化 → 趨勢（供內容日曆使用）
+      const risk = [];
+      if (price && num(old.price) && price >= num(old.price) * 1.1) risk.push('價格剛上漲');
+      if (rate && num(old.base) && rate < num(old.base)) risk.push('分潤率下降');
+      if (sales && num(old.sales)) old.trend = sales > num(old.sales) ? '上升' : sales < num(old.sales) ? '下降' : '持平';
+      old.risk = risk; old.updAt = new Date().toISOString();
       Object.assign(old, { price: price || old.price, sales: sales || old.sales, shop: shop || old.shop, aff: aff || old.aff, url: link || old.url, base: rate || old.base });
       rescore(old); updated++; continue;
     }
     const trust = sales >= 10000 ? 5 : sales >= 1000 ? 4 : 3;
     const it = makeItem({ ...blankDraft(), id: id || undefined, name, category: autoCat(name), price, base: rate, scores: { ...blankDraft().scores, trust }, sales, shop, aff, url: link, src: 'shopee' });
-    it.status = 'watch'; items.push(it); added++;
+    it.status = 'watch'; it.updAt = it.createdAt; it.risk = []; items.push(it); added++;
   }
   save.i();
   return { added, updated, vals };
@@ -410,11 +416,15 @@ const fmtDT = (iso) => { const d = new Date(iso); return Number.isNaN(+d) ? '' :
 // 改狀態時一併處理發布時間：改成「已發布」自動記錄現在時間，改離「已發布」則清除
 function setStatus(i, s) {
   if (!STATUS[s]) return;
+  const was = i.status;
   if (s === 'done' && i.status !== 'done') i.publishedAt = new Date().toISOString();
   if (s !== 'done') i.publishedAt = '';
   if ((s === 'todo' || s === 'copy') && !i.queuedAt) i.queuedAt = new Date().toISOString();
   if (s === 'watch' || s === 'drop') i.queuedAt = '';
   i.status = s;
+  // 與內容日曆連動：發布清單標記已發布／取消已發布時，同步更新對應的排程卡片
+  if (s === 'done' && was !== 'done' && typeof calOnPublish === 'function') calOnPublish(i);
+  if (s !== 'done' && was === 'done' && typeof calOnUnpublish === 'function') calOnUnpublish(i);
 }
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
@@ -530,6 +540,7 @@ function editItem(id) {
     <label>商品網址<input name="url" type="url" maxlength="500" value="${esc(i.url)}"></label>
     <label>推廣連結（分潤短網址）<input name="aff" type="url" maxlength="300" value="${esc(i.aff)}"></label>
     <label>備註<textarea name="note" rows="2" maxlength="500">${esc(i.note)}</textarea></label>
+    <div class="checks"><label><input type="checkbox" name="oos"${i.oos ? ' checked' : ''}>缺貨（內容日曆暫不排入）</label>${Array.isArray(i.risk) && i.risk.length ? `<label><input type="checkbox" name="clrRisk">清除警示：${esc(i.risk.join('、'))}</label>` : ''}</div>
     <h3>實際成效回填（復盤）</h3><div class="row2">${nf('views', '觸及', a.views)}${nf('clicks', '點擊', a.clicks)}${nf('orders', '訂單', a.orders)}${nf('commission', '佣金（元）', a.commission)}</div>
     <p class="hint">分潤比例請以蝦皮分潤後台為準；修改後分數會自動重算。</p>
     <div class="btns"><button value="cancel" formnovalidate>取消</button><button value="ok" class="pri">儲存</button></div></form>`;
@@ -541,9 +552,10 @@ function editItem(id) {
     i.price = num(f.get('price')); i.base = num(f.get('base')); i.xtra = 0; i.shop = String(f.get('shop')).trim().slice(0, 80); i.aff = safeUrl(f.get('aff'));
     for (const k of ['discount', 'rating', 'sales']) i[k] = numOr(f.get(k));
     i.actual = Object.fromEntries(['views', 'clicks', 'orders', 'commission'].map((k) => [k, f.get(k)]));
-    rescore(i); save.i(); renderList(); toast('已儲存');
+    i.oos = !!f.get('oos'); if (f.get('clrRisk')) i.risk = [];
+    rescore(i); save.i(); softRefresh(); toast('已儲存');
   };
-  d.showModal();
+  if (!d.open) d.showModal();
 }
 /* ========== M9 設定 ========== */
 async function checkConn() {
@@ -568,7 +580,7 @@ function wSum() {
 
 /* ========== 雲端同步（電腦與手機共用同一份資料） ========== */
 // 每件商品記錄最後修改時間 mt；刪除的商品記在 tomb（墓碑），合併時以較新的版本為準
-const SYNC_SETTINGS = ['weights', 'wv', 'thr', 'bonus', 'festOn', 'alias'];
+const SYNC_SETTINGS = ['weights', 'wv', 'thr', 'bonus', 'festOn', 'alias', 'cal', 'events', 'calGen'];
 let tomb = store.get('tomb', {}), snap = store.get('snap', null), syncAt = store.get('syncAt', 0);
 let syncing = false, syncAgain = false, syncTimer = 0, lastPull = 0, syncDirty = store.get('syncDirty', false);
 const hashStr = (str) => { let h = 5381; for (let k = 0; k < str.length; k++) h = ((h << 5) + h + str.charCodeAt(k)) >>> 0; return h.toString(36); };
@@ -664,7 +676,7 @@ const ACT = {
       ${festForm()}
       <div class="btns"><button type="button" class="pri" data-act="genCopy" data-id="${esc(i.id)}">開始產生文案</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
       <div id="dlgOut"></div>`;
-    d.showModal();
+    if (!d.open) d.showModal();
   },
   // 第二步：依節慶設定呼叫 AI，結果顯示在同一個視窗
   async genCopy(b) {
@@ -687,7 +699,7 @@ const ACT = {
     const d = $('#dlg');
     const body = i.aiData ? renderAnalyze({ ...i.aiData, sources: [] }, i) : (outText.view = i.aiText, `<div class="pre">${esc(i.aiText)}</div><div class="btns"><button type="button" class="pri" data-act="copy" data-k="view">複製全部</button></div>`);
     d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>${i.aiAt ? `<p class="hint">產生於 ${fmtDT(i.aiAt)}${i.aiFest ? `｜節慶資訊：${esc(i.aiFest)}` : '｜未加節慶文案'}</p>` : ''}${body}`;
-    d.showModal();
+    if (!d.open) d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
   navToggle() { setNavMini(!document.body.classList.contains('nav-mini')); },
@@ -701,7 +713,7 @@ const ACT = {
       <h3>當次使用的節慶／活動資訊</h3><p>${esc(i.aiFest)}</p>
       <h3>節慶活動文案${fp?.festival ? `（${esc(fp.festival)}）` : ''}</h3>
       ${post ? `<div class="post fest"><p>${esc(post)}</p><button type="button" data-act="copy" data-k="festView">複製</button></div>` : '<p class="muted">AI 判斷此商品不適合搭配上述節慶，所以沒有產生節慶文案。</p>'}`;
-    d.showModal();
+    if (!d.open) d.showModal();
   },
   copy(b) { copy(outText[b.dataset.k] || '', b); },
   copyAff(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && safeUrl(i.aff)) copy(i.aff, b); },
@@ -753,7 +765,7 @@ const ACT = {
       <h3>3. 總分與上限</h3><p>總分＝Σ（權重 ×（得分 − 1）÷ 4）÷ 權重合計 × 100。銷量或預估社群分潤任一項只得 1 分時，總分最高 ${CAP_TOTAL} 分（卡片標示「上限」）。</p>
       <h3>4. 等級</h3><ul><li><b>S</b>：80 分以上</li><li><b>A</b>：65–79 分</li><li><b>B</b>：50–64 分</li><li><b>C</b>：未滿 50 分</li></ul>
       <h3>分類</h3><p>依商品名稱關鍵字自動判斷，分錯可在卡片按「編輯」修改。</p>`;
-    d.showModal();
+    if (!d.open) d.showModal();
   },
   recalAll() {
     const c = calibrate(items.map((i) => ({ price: num(i.price), sales: num(i.sales), comm: commOf(i) })));
@@ -842,4 +854,4 @@ window.addEventListener('hashchange', route);
 route();
 // 打開網站時先自動同步一次，之後改由右上角按鈕手動同步
 idleStatus();
-syncNow();
+const firstSync = syncNow();

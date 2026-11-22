@@ -10,6 +10,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 <script src="app.js" defer></script>
+<script src="cal.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">跳到主要內容</a>
@@ -22,6 +23,7 @@
   <button type="button" class="nav-toggle" data-act="navToggle" aria-label="收合選單" aria-expanded="true" title="收合選單"><span aria-hidden="true">«</span></button>
   <a href="#list" data-v="list" title="商品分析"><span class="ic" aria-hidden="true">📦</span><span class="lb">商品分析</span></a>
   <a href="#pub" data-v="pub" title="發布清單"><span class="ic" aria-hidden="true">📝</span><span class="lb">發布清單</span></a>
+  <a href="#cal" data-v="cal" title="內容日曆"><span class="ic" aria-hidden="true">📅</span><span class="lb">內容日曆</span></a>
   <a href="#settings" data-v="settings" title="設定"><span class="ic" aria-hidden="true">⚙️</span><span class="lb">設定</span></a>
 </nav>
 
@@ -73,6 +75,28 @@
     <button type="button" id="pubOutBtn" data-act="pubOutSel" disabled>移出清單（0）</button>
   </div>
   <div id="pubQueue" class="cards"></div>
+</section>
+
+<!-- 內容日曆 -->
+<section id="v-cal" class="view" hidden>
+  <h1 tabindex="-1">內容日曆</h1>
+  <p class="hint">依商品評分、熱度與檔期，每週排出建議發文清單。系統只建議、不發布：請自己手動發文後再回來標記已發布。所有建議都可以新增、刪除、換商品或改日期。</p>
+  <div class="tabs" id="calTabs" role="tablist" aria-label="內容日曆畫面">
+    <button type="button" role="tab" data-act="calTab" data-t="week">週視圖</button>
+    <button type="button" role="tab" data-act="calTab" data-t="list">清單視圖</button>
+    <button type="button" role="tab" data-act="calTab" data-t="events">檔期管理</button>
+    <button type="button" role="tab" data-act="calTab" data-t="set">排程設定</button>
+  </div>
+  <div class="toolbar cal-bar" id="calWeekBar">
+    <button type="button" data-act="calPrev" aria-label="上一週">‹ 上週</button>
+    <b id="calRange" class="cal-range"></b>
+    <button type="button" data-act="calNext" aria-label="下一週">下週 ›</button>
+    <button type="button" class="ghost" data-act="calToday">回本週</button>
+    <span class="grow"></span>
+    <button type="button" data-act="calRegen">重新產生建議</button>
+  </div>
+  <div id="calAlerts"></div>
+  <div id="calBody"></div>
 </section>
 
 <!-- 設定 -->
