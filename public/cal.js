@@ -6,7 +6,7 @@
  */
 const CAL_DEF = { minG: 'A', fill: 'auto', perWeek: 10, fresh: 14, cool: 21, catCap: 40, pre: 7, days: [1, 3, 5], w: { s: 0.6, h: 0.2, c: 0.2 } };
 const CS = () => ({ ...CAL_DEF, ...(S.cal || {}), w: { ...CAL_DEF.w, ...((S.cal || {}).w || {}) } });
-const GEN_V = 2;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
+const GEN_V = 3;   // 排程規則版本：改版後，本週與之後的週會自動重排一次（保留已確認與改過的卡片）
 const GR = { S: 0, A: 1, B: 2, C: 3 }, GL = ['S', 'A', 'B', 'C'];
 const PST = { sug: '建議', set: '已排定', done: '已發布' };
 const WD = ['日', '一', '二', '三', '四', '五', '六'];
@@ -47,15 +47,19 @@ function weekSlots(ws, c) {
   const all = [...Array(7)].map((_, k) => addD(ws, k));
   let s = all.filter((d) => c.days.includes(pd(d).getDay()));
   if (!s.length) s = all;
-  return s.filter((d) => d >= today());   // 不排到已經過去的日子
+  s = s.filter((d) => d >= today());   // 不排到已經過去的日子
+  return s.length ? s : all.filter((d) => d >= today());   // 本週預設發文日都過了 → 改排本週剩下的日子
 }
 // 候選商品＋排程優先分 P = (wS×總分 + wH×熱度 + wC×檔期) ÷ 權重合計
 // 冷卻期：近 N 天內排過、發過，或已經排在之後的週
 const isBusy = (i, ws, c) => { const coolFrom = addD(ws, -c.cool); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d > coolFrom) || !!(i.publishedAt && ymd(new Date(i.publishedAt)) > coolFrom); };
 const skipped = (i, ws) => !!(i.calSkip && i.calSkip >= ws);   // 在日曆刪除的建議，那一週不再排入
-function scoreCands(ws, slots, grades, c, H, except = new Set()) {
+// 這週的目標則數：每天最多「每週則數 ÷ 發文日數」則，只剩幾天時按比例減少，避免全擠在同一天
+const weekTarget = (ws, c, slots = weekSlots(ws, c)) => { const we = addD(ws, 6), past = allPlans().filter(({ p }) => p.d >= ws && p.d <= we && p.d < today()).length; return Math.min(c.perWeek, past + slots.length * Math.ceil(c.perWeek / c.days.length)); };
+const inWeekOf = (i, ws) => { const we = addD(ws, 6); return (Array.isArray(i.plans) ? i.plans : []).some((p) => PST[p.st] && p.d >= ws && p.d <= we); };
+function scoreCands(ws, slots, grades, c, H, except = new Set(), cool = false) {
   const W = c.w, wsum = (W.s + W.h + W.c) || 1;
-  const busy = (i) => isBusy(i, ws, c) || skipped(i, ws);
+  const busy = (i) => (cool ? inWeekOf(i, ws) : isBusy(i, ws, c)) || skipped(i, ws);
   return items.filter((i) => !except.has(i.id) && i.status !== 'drop' && !INQ(i) && grades.includes(i.grade) && dataAge(i) <= c.fresh && !risks(i).length && !busy(i))
     .map((i) => {
       let ev = null, evD = '';
@@ -64,25 +68,26 @@ function scoreCands(ws, slots, grades, c, H, except = new Set()) {
       return { i, P, ev, evD };
     }).sort((a, b) => GR[a.i.grade] - GR[b.i.grade] || b.P - a.P || num(b.i.total) - num(a.i.total));   // 依等級順序（S→A→B），同等級再比排程優先分
 }
-function reasonOf(s, fill, H) {
+function reasonOf(s, fill, H, cool = false) {
   const i = s.i, a = [`總分 ${fmt(num(i.total), 1)}（${i.grade} 級）`];
   if (num(i.sales)) a.push(`月銷 ${kfmt(num(i.sales))}${(H[i.id] ?? 0) >= 80 ? '（排名前 20%）' : ''}`);
   if (i.trend === '上升') a.push('銷量比上次匯入上升');
   if (s.ev) a.push(`符合檔期「${s.ev.name}」`);
   a.push(`預估社群分潤 $${fmt(commOf(i), 1)}`);
   if (fill) a.push(`${fill} 級補位`);
+  if (cool) a.push(`近 ${CS().cool} 天內排過，候選不足時補上`);
   return a.join('、');
 }
 // 產生一週建議：fill＝補入指定等級（補位）
-function genWeek(ws, fill = '') {
+function genWeek(ws, fill = '', cool = false) {
   const c = CS(), we = addD(ws, 6), slots = weekSlots(ws, c);
   if (!slots.length) return { added: 0, short: 0 };
-  if (!fill) for (const i of items) if (Array.isArray(i.plans)) i.plans = i.plans.filter((p) => !(p.st === 'sug' && p.d >= ws && p.d <= we && p.d >= today()));
+  if (!fill && !cool) for (const i of items) if (Array.isArray(i.plans)) i.plans = i.plans.filter((p) => !(p.st === 'sug' && p.d >= ws && p.d <= we && p.d >= today()));
   const inWeek = allPlans().filter(({ p }) => p.d >= ws && p.d <= we && p.st !== 'skip');
-  const need = c.perWeek - inWeek.length;
+  const need = weekTarget(ws, c, slots) - inWeek.length;
   if (need <= 0) return { added: 0, short: 0 };
-  const H = heatMap(), grades = fill ? [fill] : GL.slice(0, GR[c.minG] + 1);
-  const sc = scoreCands(ws, slots, grades, c, H);
+  const H = heatMap(), grades = fill ? [fill] : cool ? GL.slice(0, (c.fill === 'auto' ? GR.B : GR[c.minG]) + 1) : GL.slice(0, GR[c.minG] + 1);
+  const sc = scoreCands(ws, slots, grades, c, H, new Set(), cool);
   // 同一類別一週不超過上限；候選不夠時才放寬
   const cap = Math.max(1, Math.floor(c.perWeek * c.catCap / 100)), catN = {}, pick = [];
   inWeek.forEach(({ i }) => { const k = i.category || '未分類'; catN[k] = (catN[k] || 0) + 1; });
@@ -94,13 +99,15 @@ function genWeek(ws, fill = '') {
   for (const s of pick) {
     const d = s.evD || slots.reduce((a, b) => (perDay[b] < perDay[a] ? b : a));
     perDay[d] = (perDay[d] || 0) + 1;
-    plansOf(s.i).push({ id: uid(), d, st: 'sug', p: s.P, g: s.i.grade, r: reasonOf(s, fill, H), fill: !!fill });
+    plansOf(s.i).push({ id: uid(), d, st: 'sug', p: s.P, g: s.i.grade, r: reasonOf(s, fill, H, cool), fill: !!fill, ...(cool ? { cd: 1 } : {}) });
   }
   return { added: pick.length, short: Math.max(0, need - pick.length) };
 }
 function planWeek(ws) {
   const c = CS(); let r = genWeek(ws), added = r.added;
   if (r.short && c.fill === 'auto') for (let g = GR[c.minG] + 1; g <= GR.B && r.short; g++) { r = genWeek(ws, GL[g]); added += r.added; }
+  // 還是不夠：用冷卻期內的商品補滿（同一週不重複），卡片標示「近期排過」
+  if (r.short) { r = genWeek(ws, '', true); added += r.added; }
   return { added, short: r.short };
 }
 // 下一個可補位的等級（C 級永遠不入選）
@@ -175,10 +182,10 @@ function shortWhy(ws, c) {
   const n = { low: 0, cool: 0, stale: 0, rk: 0, skip: 0, list: 0 };
   for (const i of items) {
     if (i.status === 'drop' || inWeek.has(i.id)) continue;
-    if (INQ(i)) n.list++; else if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; else if (isBusy(i, ws, c)) n.cool++;
+    if (INQ(i)) n.list++; else if (!gs.includes(i.grade)) n.low++; else if (skipped(i, ws)) n.skip++; else if (dataAge(i) > c.fresh) n.stale++; else if (risks(i).length) n.rk++; 
   }
-  const t = [[n.cool, `冷卻期內或已排在其他週 ${n.cool} 件（${c.cool} 天內不重複排同一件）`], [n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`], [n.list, `已在發布清單（手動）${n.list} 件`]].filter(([k]) => k).map(([, v]) => v);
-  return t.length ? t.join('、') : '沒有其他商品可排';
+  const t = [[n.low, `等級低於 ${gs[gs.length - 1]} 級 ${n.low} 件`], [n.stale, `資料超過 ${c.fresh} 天 ${n.stale} 件`], [n.rk, `有風險標記 ${n.rk} 件`], [n.skip, `你刪除的建議 ${n.skip} 件`], [n.list, `已在發布清單（手動）${n.list} 件`]].filter(([k]) => k).map(([, v]) => v);
+  return t.length ? t.join('、') : '符合條件的商品都已經排進這週了';
 }
 function alertsHtml(ws, we, c) {
   const all = allPlans(), wk = all.filter(({ p }) => p.d >= ws && p.d <= we);
@@ -191,9 +198,9 @@ function alertsHtml(ws, we, c) {
   if (rk.length) li.push(`<li class="warn">風險標記 <b>${rk.length}</b> 則：${list(rk)}</li>`);
   if (!items.length) li.push('<li class="warn">還沒有商品，請先到「商品分析」匯入蝦皮商品檔。</li>');
   else if (!weekSlots(ws, c).length && we >= wkStart(today())) li.push(`<li class="muted">${wn}的發文日都已經過了，請點下週的日期查看建議。</li>`);
-  else if (weekSlots(ws, c).length && cnt < c.perWeek) {
+  else if (weekSlots(ws, c).length && cnt < weekTarget(ws, c)) {
     const g = c.fill === 'auto' ? '' : nextFill(ws, we, c);
-    li.push(`<li class="warn">${wn}只排入 ${cnt} 則，少於目標 ${c.perWeek} 則。原因：${esc(shortWhy(ws, c))}。${g ? `<button type="button" data-act="calFill" data-g="${g}">補入 ${g} 級商品</button>` : ''}</li>`);
+    li.push(`<li class="warn">${wn}只排入 ${cnt} 則，少於目標 ${weekTarget(ws, c)} 則。原因：${esc(shortWhy(ws, c))}。${g ? `<button type="button" data-act="calFill" data-g="${g}">補入 ${g} 級商品</button>` : ''}</li>`);
   }
   return `<div class="cal-sum"><span>${wn}：</span><span class="pill st-set">已排定 ${pend.length}</span><span class="pill st-sug">建議 ${sugs.length}</span><span class="pill st-done">已發布 ${wk.filter(({ p }) => p.st === 'done').length}</span>${od.length ? `<span class="pill od">逾期 ${od.length}</span>` : ''}</div>${li.length ? `<ul class="cal-alerts">${li.join('')}</ul>` : ''}`;
 }
@@ -207,7 +214,7 @@ const delBtn = (pid) => `<button type="button" class="ghost del" data-act="calDe
 function calCard({ p, i }, pick = false) {
   const od = overdue(p), rk = risks(i), c = CS(), pid = esc(p.id), open = isOpen(p);
   return `<article class="ccard st-${esc(p.st)}${od ? ' od' : ''}"${open ? ' draggable="true"' : ''} data-pid="${pid}" id="cp-${pid}">
-    <div class="cc-top">${pick ? `<label class="pick"><input type="checkbox" data-cpick="${pid}"${calPicked.has(p.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>` : ''}<span class="grade g${esc(p.g)}">${esc(p.g)}</span><span class="cc-st">${od ? '逾期' : PST[p.st] || ''}</span>${p.fill ? `<span class="tag">${esc(p.g)} 級補位</span>` : ''}<span class="grow"></span><span class="cc-p" title="排程優先分（滿分 100）">${fmt(num(p.p), 1)}</span></div>
+    <div class="cc-top">${pick ? `<label class="pick"><input type="checkbox" data-cpick="${pid}"${calPicked.has(p.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>` : ''}<span class="grade g${esc(p.g)}">${esc(p.g)}</span><span class="cc-st">${od ? '逾期' : PST[p.st] || ''}</span>${p.fill ? `<span class="tag">${esc(p.g)} 級補位</span>` : ''}${p.cd ? '<span class="tag">近期排過</span>' : ''}<span class="grow"></span><span class="cc-p" title="排程優先分（滿分 100）">${fmt(num(p.p), 1)}</span></div>
     <h4>${esc(i.name)}</h4>
     <p class="cc-d">${pick ? `📅 ${esc(fmtMD(p.d))} ` : ''}${p.st === 'done' ? `✓ 發布於 ${esc(fmtDT(p.at))}` : p.t ? `⏰ ${esc(p.t)} <span class="cc-tw">${esc(p.tw || '')}</span>` : '<span class="muted">⏰ 未排時間</span>'}</p>
     <p class="cc-r">${esc(p.r || '')}</p>
@@ -250,7 +257,7 @@ function agItem({ p, i }) {
     <div class="ag-t">${esc(t)}</div>
     <div class="ag-b">
       <div class="ag-n">${esc(i.name)}</div>
-      <div class="ag-m"><span class="pill st-${esc(p.st)}${od ? ' od' : ''}">${od ? '逾期' : PST[p.st]}</span><span class="grade g${esc(p.g)}">${esc(p.g)}</span>${p.fill ? '<span class="tag">補位</span>' : ''}<span class="muted">${esc(p.st === 'done' ? '已發布' : p.tw || '未排時間')}</span></div>
+      <div class="ag-m"><span class="pill st-${esc(p.st)}${od ? ' od' : ''}">${od ? '逾期' : PST[p.st]}</span><span class="grade g${esc(p.g)}">${esc(p.g)}</span>${p.fill ? '<span class="tag">補位</span>' : ''}${p.cd ? '<span class="tag">近期排過</span>' : ''}<span class="muted">${esc(p.st === 'done' ? '已發布' : p.tw || '未排時間')}</span></div>
       <p class="cc-r">${esc(p.r || '')}</p>
       ${open && rk.length ? `<p class="cc-warn">⚠ ${esc(rk.join('、'))}</p>` : ''}${open && dataAge(i) > c.fresh ? `<p class="cc-warn">⚠ 商品資料 ${dataAge(i)} 天未更新</p>` : ''}
       <div class="cc-acts">${planBtns(p, i, pid)}${open ? `<button type="button" class="ghost" data-act="calTime" data-pid="${pid}">管理時間</button>` : ''}${delBtn(pid)}</div>
@@ -286,7 +293,7 @@ function setHtml(c) {
     <label>最低入選等級<select data-cs="minG">${['S', 'A', 'B'].map((g) => `<option value="${g}"${c.minG === g ? ' selected' : ''}>${g} 級以上</option>`).join('')}</select></label>
     <label>候選不足時<select data-cs="fill"><option value="remind"${c.fill === 'remind' ? ' selected' : ''}>提醒我，不自動降級</option><option value="auto"${c.fill === 'auto' ? ' selected' : ''}>自動依序補入下一等級（S→A→B）</option></select></label>
     ${n('perWeek', '每週發文則數', 1, 30, ' 則')}${n('fresh', '商品資料新鮮度上限', 7, 30, ' 天')}
-    ${n('cool', '冷卻期', 7, 60, ' 天')}${n('catCap', '同一類別週上限 %', 20, 100, '%')}
+    ${n('cool', '冷卻期（優先避開近期排過的商品）', 7, 60, ' 天')}${n('catCap', '同一類別週上限 %', 20, 100, '%')}
     ${n('pre', '檔期提前預熱天數', 3, 14, ' 天')}</div>
     <fieldset class="days"><legend>每週發文日</legend>${[1, 2, 3, 4, 5, 6, 0].map((d) => `<label class="chk"><input type="checkbox" data-csday="${d}"${c.days.includes(d) ? ' checked' : ''}>週${WD[d]}</label>`).join('')}</fieldset>
     <fieldset><legend>排程優先分權重（商品總分／熱度／檔期，會自動換算成合計 1）</legend><div class="row3">
