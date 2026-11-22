@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>分潤選品分析</title>
+<meta name="description" content="短影音創作者的分潤選品評分、佣金試算與 AI 內容企劃工具（非蝦皮官方）">
+<meta name="theme-color" content="#c2410c">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">跳到主要內容</a>
+<header class="top">
+  <a class="brand" href="#home">選品分析</a>
+  <span class="badge-off">非蝦皮官方</span>
+  <nav class="topnav" aria-label="其他頁面">
+    <a href="#rank" data-v="rank">排行</a>
+    <a href="#settings" data-v="settings">設定</a>
+  </nav>
+</header>
+
+<nav class="side" aria-label="主要導覽">
+  <a href="#home" data-v="home">總覽</a>
+  <a href="#rank" data-v="rank" class="desk">商品排行</a>
+  <a href="#score" data-v="score">評分</a>
+  <a href="#calc" data-v="calc">試算</a>
+  <a href="#ai" data-v="ai">AI</a>
+  <a href="#list" data-v="list">清單</a>
+  <a href="#settings" data-v="settings" class="desk">設定</a>
+</nav>
+
+<main id="main">
+
+<!-- M1 總覽 -->
+<section id="v-home" class="view">
+  <h1 tabindex="-1">總覽</h1>
+  <div id="backupNote"></div>
+  <div class="stats" id="homeStats"></div>
+  <div class="card"><h2>近期熱門（依排行熱度）</h2><div id="homeHot"></div></div>
+
+  <h2>平台策略</h2>
+  <div class="grid3">
+    <div class="card"><h3>Instagram Reels</h3><p>2026/7/1 起台灣開放，連結蝦皮分潤帳號後可在 Reels 與動態標記商品；資格細節未公開。</p><p class="hint">建議：9:16、15–30 秒，前 2 秒用前後對比抓眼球。</p></div>
+    <div class="card"><h3>Facebook Reels</h3><p>已有 Facebook 聯盟行銷夥伴計畫（2026/3 全球逾 500 萬創作者連結帳號）。</p><p class="hint">建議：情境短劇、清單推薦，受眾年齡層較廣。</p></div>
+    <div class="card"><h3>YouTube Shorts</h3><p>2026/1 起台灣啟動 YouTube Shopping 聯盟，報導指分潤最高 13.5%，可疊加賣家分潤金。</p><p class="hint">建議：實測評比、教學示範，可長期被搜尋。</p></div>
+    <div class="card"><h3>TikTok／Threads</h3><p>原生標記商品功能未查到公開資料（待確認）。</p><p class="hint">建議：以文案與個人頁連結導流，適合測試話題款。</p></div>
+  </div>
+
+  <div class="card">
+    <h2>分潤規則重點</h2>
+    <ul>
+      <li><b>申請資格：</b>蝦皮用戶，任一社群平台約 300 位好友，並通過官方審核。</li>
+      <li><b>推廣類型：</b>官方推廣、品牌加碼、商品推廣、自定義推廣；商品推廣不定期加碼（試算分「基本」與「加碼」兩欄）。</li>
+      <li><b>Sub_id：</b>自定義連結可填 Sub_id 追蹤成效，AI 分析頁會給命名建議。</li>
+      <li><b>有效訂單：</b>需經蝦皮審核，審核前佣金僅為估算（試算含「有效訂單率」）。</li>
+      <li><b>發放週期：</b>當月分潤於下個月月底寄出對帳單，回傳勞報單後付款。</li>
+    </ul>
+    <p class="hint">查證日 2026-11-22。佣金與規則會變動，一切以蝦皮官方公告為準。</p>
+  </div>
+
+  <div class="card"><h2>資格檢核</h2><div id="elig" class="checks col"></div></div>
+  <div class="card"><h2>單題問卷</h2><p>使用本工具後，你對選品是否更有把握？</p><div class="btns" id="survey"></div></div>
+</section>
+
+<!-- M2 選品評分 -->
+<section id="v-score" class="view" hidden>
+  <h1 tabindex="-1">選品評分</h1>
+  <div class="two">
+    <form id="fScore" class="col" autocomplete="off">
+      <div class="card">
+        <h2>商品資料</h2>
+        <label>商品名稱<input name="name" maxlength="120" required></label>
+        <div class="row2">
+          <label>分類<input name="category" maxlength="40" list="cats"></label>
+          <label>價格（元）<input name="price" type="number" inputmode="decimal" min="0" step="1"></label>
+        </div>
+        <div class="row2">
+          <label>基本佣金率 %<input name="base" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
+          <label>加碼佣金率 %<input name="xtra" type="number" inputmode="decimal" min="0" max="100" step="0.1"></label>
+        </div>
+        <div class="row2">
+          <label>平台<select name="platform" data-opt="platform"></select></label>
+          <label>形式<select name="format" data-opt="format"></select></label>
+        </div>
+        <datalist id="cats"><option value="美妝保養"><option value="居家收納"><option value="3C 配件"><option value="廚房用品"><option value="服飾配件"><option value="母嬰"><option value="寵物"><option value="食品"><option value="運動戶外"></datalist>
+      </div>
+      <div class="card"><h2>主觀評分（1–5）</h2><div id="sliders"></div></div>
+    </form>
+    <div class="col sticky">
+      <div class="card result" id="scoreOut" aria-live="polite"></div>
+      <div class="btns">
+        <button type="button" data-act="toCalc">帶入試算</button>
+        <button type="button" data-act="toAI">AI 深度分析</button>
+        <button type="button" class="pri" data-act="addList" id="btnAddList">加入候選清單</button>
+        <button type="button" class="ghost" data-act="resetDraft">清空</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- M3 佣金試算 -->
+<section id="v-calc" class="view" hidden>
+  <h1 tabindex="-1">佣金試算</h1>
+  <div class="two">
+    <form id="fCalc" class="col card" autocomplete="off">
+      <h2>假設參數</h2>
+      <div class="row2">
+        <label>商品價格（元）<input name="price" type="number" inputmode="decimal" min="0"></label>
+        <label>單筆佣金上限（元，選填）<input name="cap" type="number" inputmode="decimal" min="0"></label>
+        <label>基本佣金率 %<input name="base" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label>加碼佣金率 %<input name="xtra" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label>有效訂單率 %<input name="valid" type="number" inputmode="decimal" min="0" max="100"></label>
+        <label>每支影片觀看<input name="views" type="number" inputmode="numeric" min="0"></label>
+        <label>每月發片數<input name="videos" type="number" inputmode="numeric" min="0"></label>
+        <label>點擊率 CTR %<input name="ctr" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label>轉換率 CVR %<input name="cvr" type="number" inputmode="decimal" min="0" step="0.1"></label>
+        <label>每支製作時數<input name="hours" type="number" inputmode="decimal" min="0" step="0.5"></label>
+        <label>目標月收入（元）<input name="target" type="number" inputmode="numeric" min="0"></label>
+      </div>
+      <p class="hint">預設值都是假設，不是蝦皮官方數字。YouTube Shopping 報導分潤上限 13.5%。</p>
+      <div id="calib"></div>
+    </form>
+    <div class="col" id="calcOut" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- M4/M5/M6/M8 AI -->
+<section id="v-ai" class="view" hidden>
+  <h1 tabindex="-1">AI 企劃</h1>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" data-act="aiTab" data-t="analyze">商品分析</button>
+    <button type="button" role="tab" data-act="aiTab" data-t="plan">內容企劃</button>
+    <button type="button" role="tab" data-act="aiTab" data-t="trend">趨勢研究</button>
+    <button type="button" role="tab" data-act="aiTab" data-t="portfolio">組合審查</button>
+  </div>
+  <p class="hint">輸入內容會送到 Google Gemini 處理，請勿輸入個人資料。分數與收益由系統公式計算，AI 只負責創意與摘要。</p>
+
+  <div class="panel" data-p="analyze">
+    <div class="card">
+      <label>分析對象<select id="aiSrc"></select></label>
+      <div class="btns"><button type="button" class="pri" data-act="runAnalyze">AI 深度分析</button></div>
+    </div>
+    <div id="out-analyze" aria-live="polite"></div>
+  </div>
+
+  <div class="panel" data-p="plan" hidden>
+    <form class="card" id="fPlan" autocomplete="off">
+      <div class="row2">
+        <label>題材<input name="topic" maxlength="100" placeholder="例：小資居家收納"></label>
+        <label>受眾<input name="audience" maxlength="150" placeholder="例：25–35 歲租屋上班族"></label>
+        <label>平台<select name="platform" data-opt="platform"></select></label>
+        <label>每週發片數<input name="perWeek" type="number" inputmode="numeric" min="1" max="21" value="3"></label>
+        <label>天數<select name="days"><option value="7">7 天</option><option value="14">14 天</option><option value="30">30 天</option></select></label>
+      </div>
+      <label>商品（每行一個，最多 20 個）<textarea name="products" rows="4" maxlength="2000"></textarea></label>
+      <div class="btns"><button type="button" data-act="fillPlan">帶入清單「待拍」商品</button><button class="pri">產生企劃</button></div>
+    </form>
+    <div id="out-plan" aria-live="polite"></div>
+  </div>
+
+  <div class="panel" data-p="trend" hidden>
+    <form class="card" id="fTrend" autocomplete="off">
+      <div class="row2">
+        <label>題材<input name="topic" maxlength="100" placeholder="例：冬季保暖小物"></label>
+        <label>平台<select name="platform" data-opt="platform"></select></label>
+        <label>檔期或時間<input name="season" maxlength="60" placeholder="例：12.12、聖誕節"></label>
+      </div>
+      <div class="btns"><button class="pri">搜尋趨勢</button></div>
+      <p class="hint">使用 Google 搜尋接地，結果附來源連結。</p>
+    </form>
+    <div id="out-trend" aria-live="polite"></div>
+  </div>
+
+  <div class="panel" data-p="portfolio" hidden>
+    <div class="card">
+      <p id="pfInfo"></p>
+      <div class="btns"><button type="button" class="pri" data-act="runPortfolio">AI 組合審查</button></div>
+    </div>
+    <div id="out-portfolio" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- M7 候選清單 -->
+<section id="v-list" class="view" hidden>
+  <h1 tabindex="-1">候選清單</h1>
+  <div class="toolbar">
+    <label class="inline">狀態<select id="listFilter"><option value="all">全部</option><option value="todo">待拍</option><option value="done">已發布</option><option value="drop">淘汰</option></select></label>
+    <span id="listCount" class="muted"></span>
+    <span class="grow"></span>
+    <button type="button" data-act="expItems">匯出 CSV</button>
+    <label class="btn">匯入 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="items"></label>
+  </div>
+  <div id="scatter"></div>
+  <div id="listBody"></div>
+</section>
+
+<!-- M10 商品排行榜 -->
+<section id="v-rank" class="view" hidden>
+  <h1 tabindex="-1">商品排行</h1>
+  <p class="hint">排名一律由你手動記錄，本系統不爬取任何平台。TikTok Creative Center 榜單依據為廣告商品，只當靈感參考。</p>
+  <div class="tabs" id="rkTabs" role="tablist"></div>
+  <div class="toolbar">
+    <label class="inline">日期<input type="date" id="rkDate"></label>
+    <span id="rkChips" class="chips"></span>
+  </div>
+  <div id="rkTable"></div>
+  <div id="rkDetail"></div>
+
+  <div class="card">
+    <h2>新增紀錄</h2>
+    <form id="fRankMeta" class="row2" autocomplete="off">
+      <label>日期<input type="date" name="date"></label>
+      <label>榜單來源<select name="source" data-opt="source"></select></label>
+      <label>榜單名稱<input name="listName" maxlength="60" placeholder="例：美妝 Reels 週榜"></label>
+      <label>榜單長度 N<input name="listSize" type="number" inputmode="numeric" min="1" max="200" value="20"></label>
+    </form>
+    <details open>
+      <summary>手動逐筆</summary>
+      <form id="fRank" class="row2" autocomplete="off">
+        <label>名次<input name="rank" type="number" inputmode="numeric" min="1" value="1" required></label>
+        <label>商品名稱<input name="productName" maxlength="120" required></label>
+        <label>價格（元）<input name="price" type="number" inputmode="decimal" min="0"></label>
+        <label>商品網址（選填）<input name="url" type="url" maxlength="500"></label>
+        <label class="span2">備註<input name="note" maxlength="200"></label>
+        <div class="btns span2"><button class="pri">新增</button></div>
+      </form>
+    </details>
+    <details>
+      <summary>貼上文字清單（AI 解析）</summary>
+      <label>排行文字<textarea id="rkText" rows="5" maxlength="8000"></textarea></label>
+      <div class="btns"><button type="button" class="pri" data-act="rkPaste">AI 解析</button></div>
+    </details>
+    <details>
+      <summary>上傳截圖（AI 讀圖）</summary>
+      <label class="btn">選擇截圖<input class="vh" type="file" accept="image/*" id="rkImg"></label>
+      <p class="hint">圖片會先在瀏覽器縮小到長邊 1,600 px、1.5 MB 以內再送出。</p>
+    </details>
+    <details>
+      <summary>CSV 匯入／匯出</summary>
+      <div class="btns"><button type="button" data-act="expRanks">匯出排行 CSV</button><label class="btn">匯入排行 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="ranks"></label></div>
+    </details>
+    <div id="rkPreview" aria-live="polite"></div>
+  </div>
+</section>
+
+<!-- M9 設定 -->
+<section id="v-settings" class="view" hidden>
+  <h1 tabindex="-1">設定與資料管理</h1>
+  <div class="card"><h2>連線狀態</h2><p id="connStatus">檢查中…</p><div class="btns"><button type="button" data-act="checkConn">重新檢查</button></div></div>
+  <div class="card" id="setForm">
+    <h2>存取</h2>
+    <label>存取碼<input id="setCode" type="password" autocomplete="off" maxlength="100"></label>
+    <label>自備 Gemini 金鑰（選填）<input id="setKey" type="password" autocomplete="off" maxlength="200"></label>
+    <p class="hint">自備金鑰只存在此瀏覽器，以標頭轉送，伺服器不記錄。共用電腦請勿填寫。</p>
+  </div>
+  <div class="card">
+    <h2>評分權重</h2>
+    <div id="setWeights" class="row2"></div>
+    <p id="wSum" class="hint"></p>
+    <div class="btns"><button type="button" data-act="resetWeights">恢復預設權重</button></div>
+  </div>
+  <div class="card">
+    <h2>熱度分數</h2>
+    <div id="setHeat" class="row3"></div>
+    <h3>已啟用來源（計算跨平台覆蓋）</h3>
+    <div id="setSrc" class="checks"></div>
+  </div>
+  <div class="card">
+    <h2>資料管理</h2>
+    <p class="hint">資料只存在此瀏覽器，換裝置不會同步；清除瀏覽器資料會遺失，請定期匯出 CSV 備份。</p>
+    <div class="btns">
+      <button type="button" data-act="expItems">匯出候選清單 CSV</button>
+      <label class="btn">匯入候選清單 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="items"></label>
+      <button type="button" data-act="expRanks">匯出排行 CSV</button>
+      <label class="btn">匯入排行 CSV<input class="vh" type="file" accept=".csv,text/csv" data-imp="ranks"></label>
+    </div>
+    <div class="btns"><button type="button" class="danger" data-act="clearAll">清除所有本機資料</button></div>
+  </div>
+</section>
+
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+<dialog id="dlg"></dialog>
+</body>
+</html>
