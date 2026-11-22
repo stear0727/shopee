@@ -860,7 +860,9 @@ document.addEventListener('submit', async (e) => {
 
 /* ========== 蝦皮擷取書籤（此函式不在本站執行，而是轉成書籤程式碼在蝦皮頁面執行） ========== */
 function shopeeGrab(SITE) {
-  if (window.__spg) { window.__spg.style.display = 'block'; return; }
+  const VER = '3';
+  if (window.__spg && window.__spg.dataset && window.__spg.dataset.v === VER) { window.__spg.style.display = 'block'; return; }
+  if (window.__spg) { /* 頁面上是舊版擷取：先停掉再換新版 */ try { if (window.__spgStop) window.__spgStop(); else window.__spg.remove(); } catch (e) { /* 略過 */ } }
   const NAME = ['name', 'item_name', 'product_name', 'productName', 'itemName', 'title'];
   const PRICE = ['price', 'price_min', 'min_price', 'priceMin', 'item_price', 'sale_price', 'product_price', 'price_max'];
   const ID = ['itemid', 'item_id', 'itemId', 'product_id', 'productId'];
@@ -971,12 +973,15 @@ function shopeeGrab(SITE) {
     if (!confirm('清空已擷取的 ' + items.size + ' 件商品？（已送到選品網站的不受影響）')) return;
     items.clear(); try { localStorage.removeItem(KEY); } catch (e) { /* 略過 */ } upd();
   };
-  box.querySelector('[data-stop]').onclick = () => {
+  const stop = () => {
     window.fetch = of; XMLHttpRequest.prototype.send = os; clearInterval(iv); persist();
-    box.remove(); delete window.__spg;
+    box.remove(); delete window.__spg; delete window.__spgStop;
   };
+  box.querySelector('[data-stop]').onclick = stop;
+  box.dataset.v = VER;
   document.body.appendChild(box);
   window.__spg = box;
+  window.__spgStop = stop;
   upd();
 }
 const bmCode = () => 'javascript:' + encodeURIComponent(`(${shopeeGrab.toString()})(${JSON.stringify(location.origin)});void 0`);
