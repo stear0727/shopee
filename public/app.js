@@ -395,11 +395,11 @@ function pubRow(i) {
     <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
-    ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}${i.aiFest ? `｜節慶：${esc(i.aiFest.length > 30 ? i.aiFest.slice(0, 30) + '…' : i.aiFest)}` : ''}</div>` : ''}
+    ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
     <div class="acts">
       ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button>`}
       ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
-      ${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">${i.aiText ? '重新產文案' : '產生文案'}</button>
+      ${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}${i.aiFest ? `<button type="button" data-act="showFest" data-id="${id}">節慶資訊</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">${i.aiText ? '重新產文案' : '產生文案'}</button>
       ${done ? '' : `<button type="button" class="ghost" data-act="unqueue" data-id="${id}">移出清單</button>`}
     </div>
   </article>`;
@@ -527,6 +527,18 @@ const ACT = {
     d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
+  showFest(b) {
+    const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
+    const fp = i.aiData?.json?.festivalPost, post = fp && typeof fp.post === 'string' ? fp.post.trim() : '';
+    if (post) outText.festView = post;
+    const d = $('#dlg');
+    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜節慶資訊</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+      <p class="hint">文案產生於 ${fmtDT(i.aiAt)}</p>
+      <h3>當次使用的節慶／活動資訊</h3><p>${esc(i.aiFest)}</p>
+      <h3>節慶活動文案${fp?.festival ? `（${esc(fp.festival)}）` : ''}</h3>
+      ${post ? `<div class="post fest"><p>${esc(post)}</p><button type="button" data-act="copy" data-k="festView">複製</button></div>` : '<p class="muted">AI 判斷此商品不適合搭配上述節慶，所以沒有產生節慶文案。</p>'}`;
+    d.showModal();
+  },
   copy(b) { copy(outText[b.dataset.k] || ''); },
   copyAff(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && safeUrl(i.aff)) copy(i.aff); },
   // 商品
