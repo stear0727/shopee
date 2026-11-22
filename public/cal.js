@@ -131,6 +131,8 @@ function nextFill(ws, we, c) {
 const prioOf = (i, d, H = heatMap()) => { const c = CS(), ev = evOf(i, d, c), W = c.w, ws = (W.s + W.h + W.c) || 1; return { P: Math.round(((W.s * num(i.total) + W.h * (H[i.id] ?? 0) + W.c * (ev ? 100 : 0)) / ws) * 10) / 10, ev }; };
 // 整理日曆上的排程（舊資料轉換＋自動帶入時間），回傳是否有變動
 const AUTO_R = /^(從發布清單加入|已發布)$/;   // 舊版跟發布清單連動時自動建立、現已不需要的排程
+// 等待 AI 排程的商品只保留最近一次「尋找商品」選的日期範圍；之前（或舊版自動產生）留下、沒排完的一律清掉
+const inFindRng = (d) => { const r = S.calFindRng; return Array.isArray(r) && d >= r[0] && d <= r[1]; };
 function calReconcile() {
   let ch = false;
   for (const i of items) {
@@ -138,7 +140,7 @@ function calReconcile() {
     for (const p of i.plans) {                        // 舊版狀態轉換
       if (p.st === 'make') { p.st = 'set'; ch = true; } else if (p.st === 'perf') { p.st = 'done'; ch = true; }
     }
-    const n0 = i.plans.length; i.plans = i.plans.filter((p) => PST[p.st] && !(p.man && AUTO_R.test(p.r || ''))); if (i.plans.length !== n0) ch = true;
+    const n0 = i.plans.length; i.plans = i.plans.filter((p) => PST[p.st] && !(p.man && AUTO_R.test(p.r || '')) && !(p.pend && !inFindRng(p.d))); if (i.plans.length !== n0) ch = true;
   }
   return ch;
 }
@@ -439,6 +441,8 @@ function calFindDlg() {
     if (!rangeSlots(from, to, c).length) { toast('請選擇今天以後的日期'); return; }
     const old = allPlans().filter(({ p }) => p.st === 'sug' && p.d >= from && p.d <= to).length;
     if (old && !confirm(`這段日期已有 ${old} 則還沒確定的建議，要重新尋找嗎？（已確定排定與已發布的會保留）`)) return;
+    S.calFindRng = [from, to]; save.s();
+    for (const i of items) if (Array.isArray(i.plans)) i.plans = i.plans.filter((p) => !p.pend);   // 換掉之前還沒排完的等待商品
     let short = 0;
     for (let ws = wkStart(from); ws <= to; ws = addD(ws, 7)) short += planWeek(ws, [from, to]).short;
     save.i();
