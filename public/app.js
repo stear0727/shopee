@@ -63,9 +63,8 @@ const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const _s = store.get('settings', {});
 const S = { accessCode: '', ownKey: '', ..._s, weights: { ...DEF_W, ..._s.weights }, alias: { ..._s.alias } };
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
-let draft = { ...blankDraft(), ...store.get('draft', {}) };
 let items = store.get('items', []);
-const save = { s: () => store.set('settings', S), i: () => store.set('items', items), d: () => store.set('draft', draft) };
+const save = { s: () => store.set('settings', S), i: () => store.set('items', items) };
 
 /* ========== 確定性公式 ========== */
 const priceScore = (p) => (p <= 299 ? 5 : p <= 599 ? 4 : p <= 999 ? 3 : p <= 1999 ? 2 : 1);
@@ -85,21 +84,6 @@ function subId(p) {
   return `${p.platform || 'other'}_${today().slice(2).replace(/-/g, '')}_${h.toString(36).slice(0, 5)}`;
 }
 
-/* ========== SVG 圖表 ========== */
-function radar(vals, labels) {
-  const N = vals.length, cx = 160, cy = 125, R = 88;
-  const pt = (i, r) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / N; return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; };
-  const poly = (f) => vals.map((v, i) => pt(i, f(v)).map((x) => x.toFixed(1)).join(',')).join(' ');
-  let g = '';
-  for (let l = 1; l <= 4; l++) g += `<polygon class="gl" points="${poly(() => (R * l) / 4)}"/>`;
-  vals.forEach((_, i) => { const [x, y] = pt(i, R); g += `<line class="gl" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>`; });
-  g += `<polygon class="area" points="${poly((v) => (R * (v - 1)) / 4)}"/>`;
-  labels.forEach((l, i) => {
-    const [x, y] = pt(i, R + 16); const anc = Math.abs(x - cx) < 5 ? 'middle' : x > cx ? 'start' : 'end';
-    g += `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" text-anchor="${anc}">${esc(l)} ${vals[i]}</text>`;
-  });
-  return `<svg class="chart" viewBox="0 0 320 250" role="img" aria-label="雷達圖：${esc(labels.map((l, i) => `${l} ${vals[i]} 分`).join('、'))}">${g}</svg>`;
-}
 /* ========== 迷你 Markdown（先跳脫再轉換，避免注入） ========== */
 const inline = (s) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
@@ -286,8 +270,8 @@ function importItems(rows) {
   save.i(); return n;
 }
 /* ========== 路由 ========== */
-const VIEWS = ['list', 'pub', 'score', 'ai', 'settings'];
-const RENDER = { score: renderScoreOut, ai: renderAI, list: renderList, pub: renderPub, settings: renderSettings };
+const VIEWS = ['list', 'pub', 'settings'];
+const RENDER = { list: renderList, pub: renderPub, settings: renderSettings };
 function route() {
   let v = location.hash.slice(1); if (!VIEWS.includes(v)) v = 'list';
   $$('.view').forEach((s) => { s.hidden = s.id !== 'v-' + v; });
@@ -297,32 +281,6 @@ function route() {
   $(`#v-${v} h1`)?.focus({ preventScroll: true });
 }
 
-/* ========== M2 選品評分 ========== */
-const SCORE_F = ['name', 'category', 'price', 'platform', 'format'];
-function fillScoreForm() {
-  const f = $('#fScore');
-  for (const k of SCORE_F) f.elements[k].value = draft[k] ?? '';
-  for (const d of USER_DIMS) { const r = f.querySelector(`input[name="s_${d.k}"][value="${draft.scores[d.k] || 3}"]`); if (r) r.checked = true; }
-  renderScoreOut();
-}
-function readScoreForm() {
-  const f = $('#fScore');
-  for (const k of SCORE_F) draft[k] = f.elements[k].value;
-  for (const d of USER_DIMS) { const r = f.querySelector(`input[name="s_${d.k}"]:checked`); draft.scores[d.k] = r ? +r.value : 3; }
-  save.d(); renderScoreOut();
-}
-function renderScoreOut() {
-  const r = scoreOf(draft);
-  $('#scoreOut').innerHTML = `<div class="big"><span class="num">${fmt(r.total, 1)}</span><span class="grade g${r.grade}" aria-label="分級 ${r.grade}">${r.grade}</span></div>
-  <p class="act">${GRADE_ACT[r.grade]}</p>
-  ${radar(DIMS.map((d) => r.v[d.k]), DIMS.map((d) => d.s))}
-  <ul class="kv">
-    <li><span>價格帶衝動度（自動）</span><b>${r.v.price} 分</b></li>
-  </ul>
-  ${r.total < 50 ? '<p class="warn">分數低於 50，建議先不投入製作時間。</p>' : ''}`;
-  $('#btnAddList').textContent = draft.id && items.some((i) => i.id === draft.id) ? '更新商品評分' : '加入商品清單';
-  $$('#sliders [data-w]').forEach((e) => { e.textContent = `權重 ${S.weights[e.dataset.w]}`; });
-}
 function makeItem(p) {
   const r = scoreOf(p);
   const it = { id: p.id || uid(), name: String(p.name).trim().slice(0, 120), category: String(p.category || '').slice(0, 40), price: num(p.price), base: num(p.base), xtra: num(p.xtra), rate: num(p.base) + num(p.xtra), platform: PLATFORMS[p.platform] ? p.platform : 'other', format: String(p.format || '').slice(0, 20), scores: { ...p.scores }, total: r.total, grade: r.grade, status: 'todo', note: '', actual: { views: '', clicks: '', orders: '', commission: '' }, createdAt: new Date().toISOString() };
@@ -330,18 +288,7 @@ function makeItem(p) {
   return it;
 }
 function rescore(i) { const r = scoreOf(i); i.total = r.total; i.grade = r.grade; i.rate = num(i.base) + num(i.xtra); }
-/* ========== M4/M5/M6/M8 AI ========== */
-let aiSrc = 'draft';
-function renderAI() {
-  const dn = draft.name ? `目前評分中：${draft.name}` : '目前評分中的商品（尚未輸入）';
-  $('#aiSrc').innerHTML = `<option value="draft">${esc(dn)}</option>` + items.map((i) => `<option value="${esc(i.id)}">清單：${esc(i.name)}（${i.grade}）</option>`).join('');
-  $('#aiSrc').value = items.some((i) => i.id === aiSrc) ? aiSrc : 'draft';
-}
-function analyzeTarget() {
-  if (aiSrc !== 'draft') { const i = items.find((x) => x.id === aiSrc); if (i) return i; }
-  const r = scoreOf(draft);
-  return { ...draft, rate: num(draft.base) + num(draft.xtra), total: r.total, grade: r.grade, scores: { ...draft.scores } };
-}
+/* ========== AI 文案 ========== */
 function renderAnalyze(j, p) {
   const o = j.json, sub = subId(p);
   const L = (a) => (Array.isArray(a) && a.length ? `<ul>${a.map((x) => `<li>${esc(typeof x === 'string' ? x : JSON.stringify(x))}</li>`).join('')}</ul>` : '<p class="muted">（無）</p>');
@@ -428,7 +375,7 @@ function pubRow(i) {
   </article>`;
 }
 
-let catSel = 'all';
+let catSel = 'all', shownIds = [];
 function renderList() {
   // 類別按鈕：點選即顯示該類別排行（件數依類別多寡排序，「其他」放最後）
   const cnt = {};
@@ -439,9 +386,10 @@ function renderList() {
   $('#catChips').innerHTML = [['all', '全部', total], ...cats.map((c) => [c, c, cnt[c]])]
     .map(([k, l, n]) => `<button type="button" role="tab" data-act="catSel" data-c="${esc(k)}" aria-selected="${catSel === k}">${esc(l)} <span class="n">${n}</span></button>`).join('');
   calcRec();
-  const q = norm($('#listQ').value), f = $('#listFilter').value, c = catSel;
-  const arr = items.filter((i) => (f === 'all' || i.status === f) && (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)))
+  const q = norm($('#listQ').value), c = catSel;
+  const arr = items.filter((i) => (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)))
     .sort(SORT_FN[$('#listSort').value] || SORT_FN.rec);
+  shownIds = arr.map((i) => i.id);
   $('#listCount').textContent = `${c === 'all' ? '綜合排行' : `${c} 排行`}｜${arr.length} 件`;
   updPickBtn();
   if (!arr.length) { $('#listBody').innerHTML = `<p class="empty">${items.length ? '沒有符合條件的商品。' : '還沒有商品。請在上方匯入蝦皮匯出的商品檔。'}</p>`; return; }
@@ -461,9 +409,7 @@ function cardItem(i, idx) {
     <div class="pc-row sm"><span>推薦指數 <b>${recMap[i.id] ?? '—'}</b>｜<span class="grade g${i.grade}">${i.grade}</span> ${fmt(i.total, 1)} 分</span><span>${u ? `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}${i.src === 'ai' ? ' <span class="tag">AI 找到</span>' : ''}</span></div>
     ${a.views !== '' && a.views != null ? `<div class="sm muted">實際：${fmt(num(a.views))} 觸及／${fmt(num(a.orders))} 單／${fmt(num(a.commission))} 元</div>` : ''}
     ${i.note ? `<div class="sm muted">備註：${esc(i.note)}</div>` : ''}
-    ${i.status === 'done' && i.publishedAt ? `<div class="sm pubok">✓ 已發布｜${fmtDT(i.publishedAt)}</div>` : INQ(i) ? '<div class="sm"><span class="tag hot">在發布清單</span></div>' : ''}
-    <select data-act="status" data-id="${id}" aria-label="${esc(i.name)} 狀態">${opts(STATUS, i.status)}</select>
-    <div class="acts">${INQ(i) || i.status === 'done' ? '' : `<button type="button" data-act="queueOne" data-id="${id}">加入發布</button>`}${safeUrl(i.aff) ? `<button type="button" class="pri" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}<button type="button" data-act="itemAI" data-id="${id}">AI 產文案</button>${i.aiText ? `<button type="button" data-act="viewCopy" data-id="${id}">查看文案</button>` : ''}<button type="button" data-act="itemToScore" data-id="${id}">評分</button><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
+    <div class="acts"><button type="button" data-act="editItem" data-id="${id}">編輯</button><button type="button" class="danger" data-act="delItem" data-id="${id}">刪除</button></div>
   </article>`;
 }
 function editItem(id) {
@@ -472,8 +418,7 @@ function editItem(id) {
   const nf = (n, l, v, step = 'any') => `<label>${l}<input name="${n}" type="number" inputmode="decimal" min="0" step="${step}" value="${esc(v)}"></label>`;
   d.innerHTML = `<form method="dialog" id="fEdit"><h2>${esc(i.name)}</h2>
     <div class="row2">
-      <label>狀態<select name="status">${opts(STATUS, i.status)}</select></label>
-      <label>類別<input name="category" maxlength="40" list="cats" value="${esc(i.category)}"></label>
+      <label class="span2">類別<input name="category" maxlength="40" list="cats" value="${esc(i.category)}"></label>
       ${nf('price', '價格（元）', i.price)}${nf('discount', '折扣 %', i.discount)}
       ${nf('rating', '評分', i.rating)}${nf('sales', '月銷', i.sales)}
     </div>
@@ -488,7 +433,6 @@ function editItem(id) {
   d.onclose = () => {
     if (d.returnValue !== 'ok') return;
     const f = new FormData($('#fEdit'));
-    setStatus(i, f.get('status'));
     i.note = String(f.get('note')).slice(0, 500); i.category = String(f.get('category')).trim().slice(0, 40); i.url = safeUrl(f.get('url'));
     i.price = num(f.get('price')); i.shop = String(f.get('shop')).trim().slice(0, 80); i.aff = safeUrl(f.get('aff'));
     for (const k of ['discount', 'rating', 'sales']) i[k] = numOr(f.get(k));
@@ -515,35 +459,27 @@ function wSum() { const t = DIMS.reduce((s, d) => s + num(S.weights[d.k]), 0); $
 /* ========== 事件 ========== */
 const go = (h) => { if (location.hash === h) route(); else location.hash = h; };
 const ACT = {
-  // 評分
-  toAI() { readScoreForm(); aiSrc = draft.id && items.some((i) => i.id === draft.id) ? draft.id : 'draft'; go('#ai'); },
-  addList() {
-    readScoreForm();
-    if (!draft.name.trim()) { toast('請先輸入商品名稱'); $('#fScore').elements.name.focus(); return; }
-    const ix = items.findIndex((i) => i.id === draft.id);
-    const it = makeItem(draft);
-    if (ix >= 0) { const o = items[ix]; items[ix] = { ...o, ...it, status: o.status, note: o.note, actual: o.actual, aiText: o.aiText, createdAt: o.createdAt }; toast('已更新商品評分'); }
-    else { items.push(it); draft.id = it.id; save.d(); toast('已加入商品清單'); }
-    save.i(); renderScoreOut();
-  },
-  resetDraft() { draft = blankDraft(); save.d(); fillScoreForm(); },
-  // 文案
-  async runAnalyze(b) {
-    aiSrc = $('#aiSrc').value; const p = analyzeTarget(), el = $('#out-analyze');
-    if (!String(p.name || '').trim()) { toast('請先選擇商品'); return; }
-    loading(el);
+  // 文案：在彈出視窗產生並顯示
+  async itemAI(b) {
+    const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
+    const d = $('#dlg');
+    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div><div id="dlgOut"></div>`;
+    d.showModal();
+    const el = $('#dlgOut'); loading(el);
     try {
-      const j = await ai('analyze', { name: p.name, category: p.category, price: num(p.price), platform: p.platform, format: p.format, scores: p.scores, total: p.total, grade: p.grade }, b);
-      el.innerHTML = renderAnalyze(j, p);
-      const it = items.find((x) => x.id === aiSrc);
-      if (it) { it.aiText = String(outText.analyze || '').slice(0, 8000); if (it.status === 'todo') setStatus(it, 'copy'); save.i(); }
+      const j = await ai('analyze', { name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: i.scores, total: i.total, grade: i.grade }, b);
+      if (d.open) el.innerHTML = renderAnalyze(j, i);
+      i.aiText = String(outText.analyze || '').slice(0, 8000);
+      i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
+      if (i.status === 'todo') setStatus(i, 'copy');
+      save.i(); if (location.hash === '#pub') renderPub();
     } catch (e) { showErr(el, e); }
   },
-  itemAI(b) { aiSrc = b.dataset.id; location.hash = '#ai'; renderAI(); ACT.runAnalyze($('#v-ai [data-act="runAnalyze"]')); },
   viewCopy(b) {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
-    const d = $('#dlg'); outText.view = i.aiText;
-    d.innerHTML = `<h2>${esc(i.name)}｜文案</h2><div class="pre">${esc(i.aiText)}</div><div class="btns"><button type="button" class="pri" data-act="copy" data-k="view">複製</button><button type="button" data-act="closeDlg">關閉</button></div>`;
+    const d = $('#dlg');
+    const body = i.aiData ? renderAnalyze({ ...i.aiData, sources: [] }, i) : (outText.view = i.aiText, `<div class="pre">${esc(i.aiText)}</div><div class="btns"><button type="button" class="pri" data-act="copy" data-k="view">複製全部</button></div>`);
+    d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>${body}`;
     d.showModal();
   },
   closeDlg() { $('#dlg').close(); },
@@ -562,12 +498,12 @@ const ACT = {
     for (const id of picked) { const i = items.find((x) => x.id === id); if (i && !INQ(i) && i.status !== 'done') { queue(i); n++; } }
     picked.clear(); save.i(); renderList(); toast(n ? `已加入發布清單 ${n} 件` : '選取的商品已在清單或已發布');
   },
+  pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
   publish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'done'); save.i(); route(); toast(`已標記發布：${fmtDT(i.publishedAt)}`); },
   unpublish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, i.aiText ? 'copy' : 'todo'); save.i(); route(); },
   unqueue(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'watch'); save.i(); route(); },
   editItem(b) { editItem(b.dataset.id); },
-  itemToScore(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; draft = { ...blankDraft(), ...i, scores: { ...blankDraft().scores, ...i.scores } }; save.d(); fillScoreForm(); go('#score'); },
   delItem(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && confirm(`確定刪除「${i.name}」？`)) { items = items.filter((x) => x !== i); save.i(); renderList(); } },
   delAll() { if (items.length && confirm(`確定刪除全部 ${items.length} 件商品？建議先匯出備份。`)) { items = []; save.i(); renderList(); } },
   expItems() { download(`商品清單_${today()}.csv`, toCSV(items.map(flatItem), ITEM_COLS)); },
@@ -589,21 +525,25 @@ document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
   else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
-  else if (t.matches('[data-imp]') && t.files[0]) {
-    try {
-      const rows = await readTable(t.files[0]);
-      if (isShopeeFile(rows)) { const r = importShopee(rows); toast(`蝦皮商品：新增 ${r.added} 件、更新 ${r.updated} 件`); }
-      else toast(`已匯入 ${importItems(rows)} 筆`);
-      if (location.hash !== '#list') location.hash = '#list'; else route();
-    } catch (err) { toast(err?.message || '檔案讀取失敗'); }
+  else if (t.matches('[data-imp]') && t.files.length) {
+    // 可一次選多個檔案，逐一匯入後彙總結果
+    let added = 0, updated = 0, other = 0;
+    const bad = [];
+    for (const file of t.files) {
+      try {
+        const rows = await readTable(file);
+        if (isShopeeFile(rows)) { const r = importShopee(rows); added += r.added; updated += r.updated; }
+        else other += importItems(rows);
+      } catch (err) { bad.push(`${file.name}（${err?.message || '讀取失敗'}）`); }
+    }
+    toast(`${t.files.length} 個檔案：新增 ${added} 件、更新 ${updated} 件${other ? `、備份匯入 ${other} 筆` : ''}${bad.length ? `；失敗：${bad.join('、')}` : ''}`);
     t.value = '';
-  } else if (['listFilter', 'listSort'].includes(t.id)) renderList();
-  else if (t.id === 'aiSrc') aiSrc = t.value;
+    if (location.hash !== '#list') location.hash = '#list'; else route();
+  } else if (t.id === 'listSort') renderList();
 });
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t.closest('#fScore')) readScoreForm();
-  else if (t.id === 'listQ') renderList();
+  if (t.id === 'listQ') renderList();
   else if (t.id === 'setCode') { S.accessCode = t.value.trim(); save.s(); }
   else if (t.id === 'setKey') { S.ownKey = t.value.trim(); save.s(); }
   else if (t.dataset.sw) { S.weights[t.dataset.sw] = clamp(num(t.value), 0, 100); save.s(); wSum(); }
@@ -612,10 +552,6 @@ document.addEventListener('input', (e) => {
 /* ========== 初始化 ========== */
 $$('select[data-opt="platform"]').forEach((s) => { s.innerHTML = opts(PLATFORMS, 'fb'); });
 $$('select[data-opt="format"]').forEach((s) => { s.innerHTML = FORMATS.map((f) => `<option>${esc(f)}</option>`).join(''); });
-$('#listFilter').innerHTML = opts({ all: '全部狀態', ...STATUS }, 'all');
 $('#listSort').innerHTML = opts(SORTS, 'rec');
-$('#sliders').innerHTML = USER_DIMS.map((d) => `<fieldset class="seg"><legend>${esc(d.n)} <span class="w" data-w="${d.k}"></span></legend><p class="hint">${esc(d.q)}</p>
-  <div class="segs">${[1, 2, 3, 4, 5].map((i) => `<label><input type="radio" name="s_${d.k}" value="${i}" aria-label="${esc(d.n)} ${i} 分"><span>${i}</span></label>`).join('')}</div></fieldset>`).join('');
-fillScoreForm();
 window.addEventListener('hashchange', route);
 route();

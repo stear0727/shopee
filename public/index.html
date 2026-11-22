@@ -20,8 +20,6 @@
 <nav class="side" aria-label="主要導覽">
   <a href="#list" data-v="list">商品</a>
   <a href="#pub" data-v="pub">發布</a>
-  <a href="#score" data-v="score">評分</a>
-  <a href="#ai" data-v="ai">文案</a>
   <a href="#settings" data-v="settings">設定</a>
 </nav>
 
@@ -32,18 +30,18 @@
   <h1 tabindex="-1">蝦皮商品</h1>
   <div class="card">
     <h2>匯入蝦皮商品檔（CSV／Excel）</h2>
-    <p class="hint">在蝦皮分潤後台用「批量取得商品連結」匯出檔案後選檔匯入。支援 .csv 與 .xlsx（用 Excel 開過再存檔也可以）。會自動分類並保留推廣連結；重複匯入同一商品只更新價格與銷量，不會蓋掉你改過的狀態與文案。</p>
-    <label class="btn pri">選擇蝦皮匯出的檔案<input class="vh" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-imp="items"></label>
+    <p class="hint">在蝦皮分潤後台用「批量取得商品連結」匯出檔案後選檔匯入，可一次選多個檔案。支援 .csv 與 .xlsx（用 Excel 開過再存檔也可以）。會自動分類並保留推廣連結；重複匯入同一商品只更新價格與銷量，不會蓋掉你改過的狀態與文案。</p>
+    <label class="btn pri">選擇蝦皮匯出的檔案<input class="vh" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" data-imp="items" multiple></label>
   </div>
   <div class="tabs cat-tabs" id="catChips" role="tablist" aria-label="選擇類別"></div>
   <div class="filters">
     <input id="listQ" type="search" placeholder="搜尋商品名稱、分類、商店" aria-label="搜尋商品">
-    <select id="listFilter" aria-label="狀態"></select>
     <select id="listSort" aria-label="排序"></select>
   </div>
   <div class="toolbar">
     <span id="listCount" class="tag"></span>
     <button type="button" class="pri" id="pickBtn" data-act="pickAdd" disabled>加入發布清單（0）</button>
+    <button type="button" data-act="pickAll">全選</button>
     <button type="button" class="ghost" data-act="pickNone">取消選取</button>
     <span class="grow"></span>
     <button type="button" data-act="autoCatAll">自動分類</button>
@@ -56,54 +54,11 @@
 <!-- 發布清單 -->
 <section id="v-pub" class="view" hidden>
   <h1 tabindex="-1">發布清單</h1>
-  <p class="hint">在「商品」頁勾選要發布的商品加入這裡。發文後按「標記已發布」，會自動記錄發布日期時間。</p>
+  <p class="hint">在「商品」頁勾選要發布的商品加入這裡。按「產生文案」會跳出 AI 文案；發文後按「標記已發布」，會自動記錄發布日期時間。</p>
   <h2>待發布 <span class="tag" id="pubQueueN">0</span></h2>
   <div id="pubQueue" class="cards"></div>
   <h2 class="mt">已發布 <span class="tag" id="pubDoneN">0</span></h2>
   <div id="pubDone" class="cards"></div>
-</section>
-
-<!-- 評分 -->
-<section id="v-score" class="view" hidden>
-  <h1 tabindex="-1">商品評分</h1>
-  <p class="hint">從商品卡片按「評分」進來調整；也可以手動輸入一件新商品。</p>
-  <div class="two">
-    <form id="fScore" class="col" autocomplete="off">
-      <div class="card">
-        <h2>商品資料</h2>
-        <label>商品名稱<input name="name" maxlength="120" required></label>
-        <div class="row2">
-          <label>分類<input name="category" maxlength="40" list="cats"></label>
-          <label>價格（元）<input name="price" type="number" inputmode="decimal" min="0" step="1"></label>
-        </div>
-        <div class="row2">
-          <label>主要平台<select name="platform" data-opt="platform"></select></label>
-          <label>貼文形式<select name="format" data-opt="format"></select></label>
-        </div>
-      </div>
-      <div class="card"><h2>主觀評分（1–5）</h2><div id="sliders"></div></div>
-    </form>
-    <div class="col sticky">
-      <div class="card result" id="scoreOut" aria-live="polite"></div>
-      <div class="btns">
-        <button type="button" class="pri" data-act="addList" id="btnAddList">加入商品清單</button>
-        <button type="button" data-act="toAI">產生文案</button>
-        <button type="button" class="ghost" data-act="resetDraft">清空</button>
-      </div>
-    </div>
-  </div>
-  <datalist id="cats"><option value="服飾配件"><option value="美妝保養"><option value="居家生活"><option value="3C 配件"><option value="廚房用品"><option value="母嬰"><option value="寵物"><option value="食品"><option value="運動戶外"><option value="其他"></datalist>
-</section>
-
-<!-- 文案 -->
-<section id="v-ai" class="view" hidden>
-  <h1 tabindex="-1">AI 文案</h1>
-  <p class="hint">產生短貼文、心得長文、IG 輪播、照片建議與合規提醒。輸入內容會送到 Google Gemini 處理，請勿輸入個人資料。</p>
-  <div class="card">
-    <label>商品<select id="aiSrc"></select></label>
-    <div class="btns"><button type="button" class="pri" data-act="runAnalyze">產生文案</button></div>
-  </div>
-  <div id="out-analyze" aria-live="polite"></div>
 </section>
 
 <!-- 設定 -->
