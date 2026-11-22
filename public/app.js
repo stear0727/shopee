@@ -249,7 +249,14 @@ function importItems(rows) {
     it.id = r.id || it.id; it.status = STATUS[r.status] ? r.status : 'todo'; it.note = String(r.note || '').slice(0, 500);
     it.actual = { views: r.views || '', clicks: r.clicks || '', orders: r.orders || '', commission: r.commission || '' };
     it.createdAt = r.createdAt || it.createdAt;
-    const ix = items.findIndex((x) => x.id === it.id); if (ix >= 0) items[ix] = it; else items.push(it); n++;
+    const ix = items.findIndex((x) => x.id === it.id);
+    if (ix >= 0 && r.src === 'shopee') {
+      // 重新匯入擷取器資料時，只更新商品數字，保留你改過的狀態、評分、備註與文案
+      const o = items[ix];
+      Object.assign(o, { name: it.name, category: it.category || o.category, price: it.price || o.price, base: it.base || o.base, discount: it.discount, rating: it.rating, sales: it.sales, url: it.url || o.url, summary: it.summary });
+      rescore(o);
+    } else if (ix >= 0) items[ix] = it; else items.push(it);
+    n++;
   }
   save.i(); return n;
 }

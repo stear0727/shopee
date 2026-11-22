@@ -1,5 +1,7 @@
 .codegraph/
 .netlify/
 node_modules/
+collector/.profile/
+collector/output/
 .env
 .env.*
