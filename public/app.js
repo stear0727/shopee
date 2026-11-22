@@ -106,8 +106,8 @@ const S = { accessCode: '', ownKey: '', ..._s, wv: 3, weights: _s.wv === 3 && _s
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
 let items = store.get('items', []);
 const save = {
-  s: () => { S.setAt = Date.now(); store.set('settings', S); if (typeof markDirty === 'function') { markDirty(); scheduleSync(); } },
-  i: () => { if (typeof stampItems === 'function') stampItems(); store.set('items', items); if (typeof markDirty === 'function') { markDirty(); scheduleSync(); } },
+  s: () => { S.setAt = Date.now(); store.set('settings', S); if (typeof markDirty === 'function') markDirty(); },
+  i: () => { const changed = typeof stampItems === 'function' ? stampItems() : true; store.set('items', items); if (changed && typeof markDirty === 'function') markDirty(); },
 };
 
 /* ========== 確定性公式 ========== */
@@ -528,19 +528,20 @@ function wSum() {
 // 每件商品記錄最後修改時間 mt；刪除的商品記在 tomb（墓碑），合併時以較新的版本為準
 const SYNC_SETTINGS = ['weights', 'wv', 'thr', 'bonus', 'festOn', 'alias'];
 let tomb = store.get('tomb', {}), snap = store.get('snap', null), syncAt = store.get('syncAt', 0);
-let syncing = false, syncAgain = false, syncTimer = 0, lastPull = 0, syncDirty = false;
+let syncing = false, syncAgain = false, syncTimer = 0, lastPull = 0, syncDirty = store.get('syncDirty', false);
 const hashStr = (str) => { let h = 5381; for (let k = 0; k < str.length; k++) h = ((h << 5) + h + str.charCodeAt(k)) >>> 0; return h.toString(36); };
 const hashItem = (i) => { const { mt, ...r } = i; return hashStr(JSON.stringify(r)); };
 function stampItems() {
-  const now = Date.now(), next = {};
+  const now = Date.now(), next = {}; let changed = !snap && items.length > 0;
   for (const i of items) {
     const h = hashItem(i);                       // 雜湊不含 mt，所以標記時間不影響比對
     if (!snap) { if (!i.mt) i.mt = now; }        // 第一次啟用同步：既有商品記為現在
-    else if (snap[i.id] !== h) i.mt = now;       // 新增或內容有變動
+    else if (snap[i.id] !== h) { i.mt = now; changed = true; }   // 新增或內容有變動
     next[i.id] = h;
   }
-  if (snap) for (const id in snap) if (!next[id]) tomb[id] = now;
+  if (snap) for (const id in snap) if (!next[id]) { tomb[id] = now; changed = true; }
   snap = next; store.set('snap', snap); store.set('tomb', tomb);
+  return changed;
 }
 const syncPayload = () => ({ items, tomb, settings: { ...Object.fromEntries(SYNC_SETTINGS.map((k) => [k, S[k]])), at: S.setAt || 0 } });
 function mergeRemote(remote) {
@@ -563,8 +564,8 @@ function mergeRemote(remote) {
   store.set('items', items); store.set('snap', snap); store.set('tomb', tomb);
   return changed;
 }
-function setSyncStatus(t, bad) {
-  for (const el of $$('.sync-status')) { el.textContent = t; el.classList.toggle('err', !!bad); }
+function setSyncStatus(t, bad, warn) {
+  for (const el of $$('.sync-status')) { el.textContent = t; el.classList.toggle('err', !!bad); el.classList.toggle('warn', !bad && !!warn); }
 }
 async function syncNow(retry = 0) {
   if (location.protocol === 'file:') { setSyncStatus('本機檔案模式，未同步'); return; }
@@ -579,11 +580,11 @@ async function syncNow(retry = 0) {
     if (mergeRemote(j.data)) softRefresh();
     // 本機有修改（或雲端還是空的）才上傳；只是收到別台的更新時不重複上傳
     if (syncDirty || (!j.at && items.length)) {
-      const sentDirty = syncDirty; syncDirty = false;
+      const sentDirty = syncDirty; syncDirty = false; store.set('syncDirty', false);
       const p = await fetch('/api/data', { method: 'PUT', headers: h, body: JSON.stringify({ data: syncPayload(), base: j.at }) });
       const pj = await p.json().catch(() => ({ ok: false, error: `HTTP ${p.status}` }));
-      if (p.status === 409 && retry < 3) { syncDirty = syncDirty || sentDirty; syncing = false; return syncNow(retry + 1); }
-      if (!p.ok || !pj.ok) { syncDirty = syncDirty || sentDirty; throw Object.assign(new Error(pj.error || `HTTP ${p.status}`), { status: p.status }); }
+      if (p.status === 409 && retry < 3) { syncDirty = syncDirty || sentDirty; store.set('syncDirty', syncDirty); syncing = false; return syncNow(retry + 1); }
+      if (!p.ok || !pj.ok) { syncDirty = syncDirty || sentDirty; store.set('syncDirty', syncDirty); throw Object.assign(new Error(pj.error || `HTTP ${p.status}`), { status: p.status }); }
       syncAt = pj.at;
     } else syncAt = j.at;
     store.set('syncAt', syncAt);
@@ -592,23 +593,12 @@ async function syncNow(retry = 0) {
     setSyncStatus(e.status === 401 ? '☁ 未同步：需要存取碼' : e instanceof TypeError ? '☁ 離線，未同步' : `☁ 同步失敗：${e.message}`, true);
   } finally {
     syncing = false;
-    if (syncAgain) { syncAgain = false; scheduleSync(300); }
+    if (syncAgain) { syncAgain = false; syncNow(); }
   }
 }
-const scheduleSync = (ms = 800) => { clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, ms); };
-const markDirty = () => { syncDirty = true; };
-// 即時同步：每 4 秒只查雲端版本（不下載資料），有新版本才下載合併並直接更新畫面
-async function checkRemote() {
-  if (location.protocol === 'file:' || syncing || document.visibilityState !== 'visible' || $('#dlg').open) return;
-  const h = {}; if (S.accessCode) h['x-access-code'] = S.accessCode;
-  try {
-    const r = await fetch('/api/data?check=1', { headers: h, cache: 'no-store' });
-    const j = await r.json();
-    if (j.ok && j.at > syncAt) syncNow();
-  } catch { /* 離線時下次再試 */ }
-}
-setInterval(checkRemote, 4000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkRemote(); });
+// 手動同步：本機有修改時在右上角提醒，按下按鈕才同步
+const markDirty = () => { syncDirty = true; store.set('syncDirty', true); setSyncStatus('☁ 有變更未同步', false, true); };
+const idleStatus = () => setSyncStatus(syncDirty ? '☁ 有變更未同步' : syncAt ? `☁ 上次同步 ${fmtDT(new Date(syncAt).toISOString()).slice(5)}` : '☁ 點此同步', false, syncDirty);
 // 收到別台裝置的更新時，只重繪目前畫面、保留捲動位置；正在編輯時延後到結束後再更新
 let pendingRender = false;
 function softRefresh() {
@@ -806,4 +796,4 @@ function setNavMini(on) {
 setNavMini(!!store.get('navMini', false));
 window.addEventListener('hashchange', route);
 route();
-syncNow();
+idleStatus();

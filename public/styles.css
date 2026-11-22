@@ -224,6 +224,8 @@ a.btn{text-decoration:none}
 .sync-top{margin-left:auto;min-height:36px;padding:0 10px;font-size:.8125rem;color:var(--mut);background:transparent;border:1px solid transparent;border-radius:99px;white-space:nowrap}
 .sync-top:hover{border-color:var(--line);color:var(--fg)}
 .sync-status.err{color:var(--bad)}
+.sync-status.warn{color:var(--warn);font-weight:700}
+.sync-top.warn{border-color:var(--warn)}
 /* AI output */
 .out-head{display:flex;justify-content:flex-end;gap:8px;margin-bottom:4px}
 .verdict{font-size:1.1rem;font-weight:700}
