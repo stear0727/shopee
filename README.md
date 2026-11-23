@@ -9,10 +9,33 @@ public/               靜態網站（Netlify 發布目錄）
   index.html          版面與表單
   styles.css          RWD、深色模式
   app.js              M1–M10 全部前端邏輯（評分、試算、清單、排行、AI 介面、CSV、自繪 SVG 圖表）
+  video.js            🎬 影片製作頁（照片動畫、AI 腳本與配音、Canvas 算圖與錄製）
 netlify/functions/
   ai.mjs              /api/ai：任務白名單、伺服器端組裝提示詞、呼叫 Gemini、模型回退
+  tts.mjs             /api/tts：影片旁白配音（Gemini TTS）
+  media.mjs           /api/media：影片素材存放（Netlify Blobs）
+  omni-background.mjs AI 動態鏡頭背景函式（Gemini Omni）
+netlify/lib/gate.mjs  新端點共用的存取檢查與錯誤訊息
 netlify.toml          發布設定、CSP 與安全標頭
 ```
+
+## 🎬 影片製作（#video）
+
+用商品照片做 9:16 直式的第一人稱使用說明短影音，全部在網站內完成：
+
+1. 選商品、上傳 3–8 張照片（自動壓縮到 1080 px，存在 Netlify Blobs）
+2. AI 看照片寫腳本（`/api/ai` 的 `video_script` 任務）：每段旁白、字卡、用哪張照片、動態效果（拿起／推近／噴霧／光澤掃過／多圖拼貼／產品收尾），全部可修改
+3. AI 配音（`/api/tts`，Gemini TTS，一次一句；文字沒改的句子不會重複產生）
+4. 背景音樂：使用者自行上傳（≤ 5 MB）
+5. 選用：AI 動態鏡頭（`omni-background` 背景函式呼叫 Gemini Omni，最長 15 分鐘，前端輪詢進度）
+6. 瀏覽器用 Canvas 即時算圖並錄製（MediaRecorder），Chrome／Edge 輸出 MP4，其他瀏覽器輸出 WebM
+
+每個步驟都有進度條。腳本與設定存在商品的 `video` 欄位並跟著雲端同步；照片、配音、音樂、動態鏡頭存在 Blobs 的 `shoopee-media`（`/api/media`）。
+
+注意事項：
+- Gemini **免費方案**的 TTS 每天約 10 句、Gemini Omni 額度為 0；要穩定使用請在 Google AI Studio 啟用付費方案
+- 輸出是即時錄製，影片多長就要錄多久，錄製中請停留在該分頁；每次開啟頁面第一次輸出 MP4 會先暖機約 4 秒
+- 新增的端點與既有端點相同：有設定 `ACCESS_CODE` 時需在設定頁填入存取碼
 
 ## 部署
 
@@ -26,6 +49,8 @@ netlify.toml          發布設定、CSP 與安全標頭
 | `GEMINI_FALLBACK_MODELS` | 否 | 逗號分隔的備用模型清單 |
 | `ACCESS_CODE` | 建議 | 存取碼，使用者在設定頁填入後才能用伺服器金鑰 |
 | `AI_TIMEOUT_MS` | 否 | 呼叫 Gemini 的總逾時（預設 25000），請配合 Netlify 方案的 Function 逾時上限 |
+| `GEMINI_TTS_MODEL` | 否 | 影片配音模型（預設 `gemini-3.8-flash-tts`） |
+| `GEMINI_OMNI_MODEL` | 否 | AI 動態鏡頭模型（預設 `gemini-omni-1.1-flash`，需付費方案） |
 
 3. 在 Google 平台設定 API 用量上限與告警。
 
