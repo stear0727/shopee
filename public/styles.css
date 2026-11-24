@@ -323,3 +323,5 @@ label.inl{display:flex;align-items:center;gap:8px;margin:0}label.inl select{widt
 .vbthumb canvas{display:block;width:100%;height:auto;border-radius:6px}
 .vbthumb span{font-size:.75rem;color:var(--mut)}
 .vbthumb.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.vbthumbs{display:flex;gap:8px;overflow-x:auto;padding:4px 2px 8px;scroll-snap-type:x proximity}
+.vbthumbs .vbthumb{flex:0 0 68px;scroll-snap-align:start}

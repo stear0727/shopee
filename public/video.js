@@ -397,11 +397,7 @@ function buildRender(i, srcEls) {
     t += d; return o;
   });
   const keep = a?.screen?.isRecording ? a.screen.keep : [0, 0, 1000, 1000];
-  const tracks = [
-    ...(a?.blur || []).filter((b) => !v.blurOff.includes(b.id)),
-    ...v.manualBlur.map((m) => ({ id: m.id, label: m.label, pts: m.track?.length ? m.track : m.keys })),
-  ];
-  return { i, v, plan, st, shots, total: t, keep, tracks, times: a?.times || [], els: srcEls || [], proc: null };
+  return { i, v, plan, st, shots, total: t, keep, boxesAt: (ts) => frameBoxesAt(v, ts), times: a?.times || [], els: srcEls || [], proc: null };
 }
 // 某個時間點的模糊框（在 AI 有標記的格子之間線性追蹤；超出範圍就沿用最近的位置，確保全程遮住）
 function boxAt(tr, ts, times) {
@@ -431,9 +427,8 @@ function processFrame(R, el, ts) {
   const { proc, pctx: c, st } = R, pw = proc.width, ph = proc.height;
   c.save(); if (canFilter && st.filter) c.filter = st.filter; c.drawImage(el, 0, 0, pw, ph); c.restore();
   if (!canFilter && st.tint) { c.save(); c.globalCompositeOperation = st.tint[2]; c.globalAlpha = st.tint[1]; c.fillStyle = st.tint[0]; c.fillRect(0, 0, pw, ph); c.restore(); }
-  for (const tr of R.tracks) {
-    const b = boxAt(tr, ts, R.times); if (!b) continue;
-    const pad = tr.fixed ? 0 : tr.pts ? 0.06 : 0.12;
+  for (const b of R.boxesAt(ts)) {
+    const pad = 0.04;
     let [y1, x1, y2, x2] = b; const bw = x2 - x1, bh = y2 - y1;
     x1 -= bw * pad; x2 += bw * pad; y1 -= bh * pad; y2 += bh * pad;
     const x = Math.max(0, x1 / 1000 * pw), y = Math.max(0, y1 / 1000 * ph), w = Math.min(pw, x2 / 1000 * pw) - x, h = Math.min(ph, y2 / 1000 * ph) - y;
@@ -723,11 +718,13 @@ function renderVideo(force) {
     ${blocked ? `<div class="valert bad">⛔ 依台灣法規，這類商品不能製作廣告影片：${esc(plan.prohibited.reason)}</div>` : ''}
     ${plan ? planHtml(v, plan, dur) : ''}</div>`;
 
-  const bCard = !v.src ? '' : `<div class="card"><h2>3. 遮蔽（選用） <span class="tag" id="vBlurCount">${v.manualBlur.length} 個</span></h2>
-    <p class="hint">畫面裡有價格標籤、日期／有效期限、促銷吊牌、別家商品或卡通角色時，直接在下方畫面上<b>拖曳</b>框起來，輸出時會全程模糊，框會自動跟著畫面移動。</p>
+  const bCard = !v.src ? '' : `<div class="card"><h2>3. 遮蔽（選用） <span class="tag" id="vBlurCount">未框選</span></h2>
+    <p class="hint">每張畫面各自框選：哪一張有價格標籤、日期／有效期限、促銷吊牌、別家商品或卡通角色，就在那一張上<b>拖曳</b>框起來。只有你框的地方會模糊，沒框的時間點不模糊；相鄰兩張在相近位置都有框時，框會在兩張之間平滑移動。</p>
+    <p class="sm muted" id="vBCur"></p>
     <div class="vbstage" id="vBStage"><canvas id="vBCanvas" width="360" height="640" aria-label="在畫面上拖曳框出要模糊的範圍"></canvas></div>
     <div class="vframes vbthumbs" id="vFrames">${(a?.times || []).map((t, k) => `<button type="button" class="vbthumb${k === bSel ? ' on' : ''}" data-act="vBSel" data-k="${k}" aria-label="切換到 ${f1(t)} 秒的畫面"><canvas data-fr="${k}" width="120" height="213"></canvas><span>${f1(t)} 秒</span></button>`).join('')}</div>
-    <p class="hint">拖曳空白處＝新增模糊框｜拖曳框內＝移動（追蹤跑掉時，切到那一格把框拖回正確位置）｜點框右上角的 ✕＝刪除。實線框＝你放的位置，虛線框＝自動追蹤的位置。</p>
+    <div class="btns"><button type="button" data-act="vBCopyPrev">沿用上一張的框</button><button type="button" class="ghost" data-act="vBClear">清除這一張的框</button></div>
+    <p class="hint">拖曳空白處＝新增框｜拖曳框內＝移動｜點框右上角的 ✕＝刪除｜點下方縮圖＝切換畫面。白色虛線是上一張框的位置（只是參考，不會模糊）。</p>
     <div id="vBlurProg" class="vprog-box"></div></div>`;
 
   const kCard = !plan ? '' : `<div class="card"><h2>4. 關鍵畫面檢查</h2>
@@ -752,8 +749,13 @@ function renderVideo(force) {
 }
 // 不分析影片：只在本機準備遮蔽用的畫面時間點，分鏡與文案完全依使用者的提示詞
 function ensurePrep(v) {
-  if (v.analysis?.times?.length && v.analysis.prepFor === v.src.at) return;
-  v.analysis = { prepFor: v.src.at, times: frameTimes(v.src.duration, N_FRAMES), blur: [], screen: { isRecording: false, keep: [0, 0, 1000, 1000] } };
+  const key = `${v.src.at}|f2`;
+  if (v.analysis?.times?.length && v.analysis.prepFor === key && Array.isArray(v.frameBlur) && v.frameBlur.length === v.analysis.times.length) return;
+  const times = frameTimes(v.src.duration, thumbCount(v.src.duration));
+  v.analysis = { prepFor: key, times, blur: [], screen: { isRecording: false, keep: [0, 0, 1000, 1000] } };
+  v.frameBlur = times.map(() => []);
+  for (const m of v.manualBlur || []) for (const k of m.keys || (m.box ? [{ t: 0, box: m.box }] : [])) v.frameBlur[nearestIdx(times, k.t)].push({ id: uid(), box: k.box });
+  v.manualBlur = [];
 }
 function planHtml(v, plan, dur) {
   const st = STYLES[plan.style];
@@ -845,7 +847,7 @@ async function runKeys(btn) {
       await seekTo(el, s.srcStart + lt * s.rate);
       const S = drawFrame(ctx, s.t0 + lt, R, el);
       const issues = [...layoutIssues(S), ...copyIssues(`${S.caption} ${S.sub}`)];
-      const active = R.tracks.filter((tr) => boxAt(tr, el.currentTime, R.times)).map((tr) => tr.label);
+      const nb = R.boxesAt(el.currentTime).length, active = nb ? [`${nb} 處`] : [];
       const th = document.createElement('canvas'); th.width = 270; th.height = 480; th.getContext('2d').drawImage(c, 0, 0, 270, 480);
       res.push({ s, url: th.toDataURL('image/jpeg', 0.82), issues, active });
     }
@@ -1007,7 +1009,7 @@ function reportText(i, v) {
   let t = 0;
   const RR = { plan: p, shots: p.shots };
   const shots = p.shots.map((s, k) => { const d = Math.min(SHOT_MAX, Math.max(SHOT_MIN, Number(s.dur) || 3)); const line = `${k + 1}. ${f1(t)}–${f1(t + d)} 秒｜${ROLES[s.role]}｜${s.role === 'cta' && !s.caption ? p.cta : s.caption}${s.sub ? `／${s.sub}` : ''}｜${MOVES[s.move]}＋${FXS[s.fx]}${k ? `｜轉場：${TRANS[trFor(RR, k)]}${s.tr && s.tr !== 'auto' ? '（手動）' : ''}` : ''}${s.demo ? '｜含示意註記' : ''}`; t += d; return line; });
-  const blurs = v.manualBlur.map((m) => `${m.label}（${m.track?.length ? '自動追蹤' : '固定位置'}，${m.keys.length} 個關鍵位置）`);
+  const bs = blurStats(v), blurs = bs.n ? [`在 ${bs.f} 個時間點框選了 ${bs.n} 個模糊框（只在框選的時間點附近模糊）`] : [];
   const sources = p.shots.map((s, k) => `分鏡 ${k + 1}：${s.source || '（未提供）'}`);
   const confirmList = [
     ...p.shots.flatMap((s, k) => copyIssues(`${s.caption} ${s.sub}`).map((x) => `分鏡 ${k + 1}：${x}`)),
@@ -1029,168 +1031,104 @@ function reportText(i, v) {
   ].filter(Boolean).join('\n');
 }
 
-/* ========== 遮蔽：直接在畫面上框選，框會自動追蹤影片中的移動 ==========
- * 追蹤完全在瀏覽器裡進行（不用 AI、不上傳）：每 0.2 秒取一格低解析度灰階畫面，
- * 用框內的畫面內容當樣板，在下一格的附近找最相像的位置。使用者在某一格把框拖到新位置，
- * 就成為那一格的「關鍵位置」，兩個關鍵位置之間由前後兩個方向的追蹤結果平均，跑掉時可以逐格修正。
+/* ========== 遮蔽：每張畫面各自框選 ==========
+ * 縮圖約每秒一張；每一張有自己的模糊框（v.frameBlur[張數] = [{ id, box }]）。
+ * 影片中的模糊只依使用者框的位置：
+ *  - 相鄰兩張在相近位置都有框 → 框從前一張的位置平滑移到後一張的位置
+ *  - 只有一邊有框 → 只在那一張前後各一半的時間模糊
+ *  - 沒有框的時間點完全不模糊
  */
-let bSel = 0;                       // 目前編輯的畫面（縮圖編號）
-let bDrag = null;                   // 拖曳中的狀態
-let trackCache = null;              // { key, times, gray, W, H }：同一支影片只解碼一次
-let trackQueue = Promise.resolve();
-const TRACK_STEP = 0.2, TRACK_W = 160;
-const mbBox = (m, t) => (m.track?.length ? boxAt({ pts: m.track }, t) : boxAt({ pts: m.keys }, t));
-
-async function ensureGray(i, v, onP) {
-  const key = `${i.id}|${v.src?.at}`;
-  if (trackCache?.key === key) return trackCache;
-  const url = await srcURL(i); if (!url) throw new Error('這台裝置上沒有這支影片，請重新選擇同一支影片');
-  const el = mkVideo(url); await vidReady(el);
-  const W = TRACK_W, H = Math.round(W * (el.videoHeight || 16) / (el.videoWidth || 9));
-  const times = []; for (let t = 0; t < v.src.duration - 0.05; t += TRACK_STEP) times.push(Math.round(t * 100) / 100);
-  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d', { willReadFrequently: true });
-  const gray = [];
-  for (const [n, t] of times.entries()) {
-    await seekTo(el, t); x.drawImage(el, 0, 0, W, H);
-    const d = x.getImageData(0, 0, W, H).data, g = new Float32Array(W * H);
-    for (let p = 0, q = 0; q < g.length; p += 4, q++) g[q] = d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
-    gray.push(g); onP?.((n + 1) / times.length);
-  }
-  el.removeAttribute('src'); el.load(); el.remove();
-  return (trackCache = { key, times, gray, W, H });
-}
+let bSel = 0, bDrag = null;
+const thumbCount = (dur) => Math.max(6, Math.min(30, Math.round(dur)));
 const nearestIdx = (times, t) => { let b = 0; for (let k = 1; k < times.length; k++) if (Math.abs(times[k] - t) < Math.abs(times[b] - t)) b = k; return b; };
-// 從第 idx0 格的框開始，往 dir 方向逐格找出框中心（低解析度像素座標）
-function follow(TC, idx0, box, dir, stop) {
-  const { gray, W, H } = TC;
-  const tw = Math.max(6, Math.round((box[3] - box[1]) / 1000 * W)), th = Math.max(6, Math.round((box[2] - box[0]) / 1000 * H));
-  const stride = Math.max(1, Math.floor(Math.min(tw, th) / 14)), R = Math.max(5, Math.round(W * 0.07));
-  let cx = (box[1] + box[3]) / 2000 * W, cy = (box[0] + box[2]) / 2000 * H;
-  const sample = (g, ccx, ccy) => { const out = [], x0 = Math.round(ccx - tw / 2), y0 = Math.round(ccy - th / 2);
-    for (let y = 0; y < th; y += stride) for (let x = 0; x < tw; x += stride) { const px = Math.min(W - 1, Math.max(0, x0 + x)), py = Math.min(H - 1, Math.max(0, y0 + y)); out.push(g[py * W + px]); }
-    return out; };
-  const T = sample(gray[idx0], cx, cy), res = new Map([[idx0, [cx, cy]]]);
-  for (let k = idx0 + dir; dir > 0 ? k <= stop : k >= stop; k += dir) {
-    const g = gray[k]; let best = Infinity, bx = cx, by = cy;
-    for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
-      const x0 = Math.round(cx + dx - tw / 2), y0 = Math.round(cy + dy - th / 2); let sad = 0, n = 0;
-      for (let y = 0; y < th && sad < best; y += stride) for (let x = 0; x < tw; x += stride) {
-        const px = Math.min(W - 1, Math.max(0, x0 + x)), py = Math.min(H - 1, Math.max(0, y0 + y));
-        sad += Math.abs(g[py * W + px] - T[n++]);
-      }
-      if (sad < best) { best = sad; bx = cx + dx; by = cy + dy; }
-    }
-    cx = bx; cy = by; res.set(k, [cx, cy]);
-    const C = sample(g, cx, cy); for (let q = 0; q < T.length; q++) T[q] = T[q] * 0.85 + C[q] * 0.15;   // 樣板慢慢適應畫面變化
+const ctr = (b) => [(b[1] + b[3]) / 2, (b[0] + b[2]) / 2];
+// 某個時間點要模糊的位置（0–1000 比例座標）
+function frameBoxesAt(v, t) {
+  const T = v.analysis?.times || [], F = v.frameBlur || []; if (!T.length) return [];
+  const n = T.length;
+  if (t <= T[0]) return (F[0] || []).map((b) => b.box);
+  if (t >= T[n - 1]) return (F[n - 1] || []).map((b) => b.box);
+  let a = 0; while (a < n - 2 && T[a + 1] <= t) a++;
+  const b = a + 1, A = F[a] || [], B = F[b] || [], q = (t - T[a]) / Math.max(0.001, T[b] - T[a]), out = [], used = new Set();
+  for (const x of A) {
+    let best = -1, bd = 300;   // 前後兩張相近位置（畫面的 30% 以內）的框視為同一個東西
+    B.forEach((y, j) => { if (used.has(j)) return; const [ax, ay] = ctr(x.box), [bx, by] = ctr(y.box), d = Math.hypot(ax - bx, ay - by); if (d < bd) { bd = d; best = j; } });
+    if (best >= 0) { used.add(best); out.push(x.box.map((m, k) => lerp(m, B[best].box[k], q))); }
+    else if (q < 0.5) out.push(x.box);
   }
-  return res;
+  if (q >= 0.5) B.forEach((y, j) => { if (!used.has(j)) out.push(y.box); });
+  return out;
 }
-function computeTrack(TC, m) {
-  const { times, W, H } = TC, N = times.length;
-  const keys = []; for (const k of m.keys.slice().sort((a, b) => a.t - b.t)) { const i = nearestIdx(times, k.t); const ex = keys.find((x) => x.i === i); if (ex) ex.box = k.box; else keys.push({ i, box: k.box }); }
-  keys.sort((a, b) => a.i - b.i);
-  const centers = new Array(N), first = keys[0], last = keys[keys.length - 1];
-  for (const [k, c] of follow(TC, first.i, first.box, -1, 0)) centers[k] = c;
-  for (const [k, c] of follow(TC, last.i, last.box, 1, N - 1)) centers[k] = c;
-  for (let s = 0; s < keys.length - 1; s++) {
-    const a = keys[s], b = keys[s + 1], F = follow(TC, a.i, a.box, 1, b.i), B = follow(TC, b.i, b.box, -1, a.i);
-    for (let k = a.i; k <= b.i; k++) { const w = (k - a.i) / Math.max(1, b.i - a.i), f = F.get(k), g = B.get(k); centers[k] = [f[0] * (1 - w) + g[0] * w, f[1] * (1 - w) + g[1] * w]; }
-  }
-  const sz = (b) => [b[3] - b[1], b[2] - b[0]];
-  const sizeAt = (k) => {
-    if (k <= first.i) return sz(first.box); if (k >= last.i) return sz(last.box);
-    for (let s = 0; s < keys.length - 1; s++) if (k >= keys[s].i && k <= keys[s + 1].i) { const w = (k - keys[s].i) / Math.max(1, keys[s + 1].i - keys[s].i), A = sz(keys[s].box), B = sz(keys[s + 1].box); return [lerp(A[0], B[0], w), lerp(A[1], B[1], w)]; }
-    return sz(last.box);
-  };
-  return times.map((t, k) => {
-    const [cx, cy] = centers[k] || [W / 2, H / 2], [bw, bh] = sizeAt(k), x1 = cx / W * 1000 - bw / 2, y1 = cy / H * 1000 - bh / 2;
-    return { t, box: [y1, x1, y1 + bh, x1 + bw].map((n) => Math.round(Math.max(0, Math.min(1000, n)))) };
-  });
-}
-// 依序追蹤（避免同時解碼兩次）
-function runTrack(i, v, m) {
-  trackQueue = trackQueue.then(async () => {
-    try {
-      m.tracking = true; paintBlur(i, v);
-      const TC = await ensureGray(i, v, (p) => vProg('vBlurProg', p * 0.9, `分析畫面中，準備自動追蹤…${Math.round(p * 100)}%`));
-      if (!v.manualBlur.includes(m)) return;   // 追蹤前就被刪除了
-      vProg('vBlurProg', 0.95, '自動追蹤中…');
-      m.track = computeTrack(TC, m);
-      vProg('vBlurProg', 1, `✓ 已自動追蹤「${m.label}」；若某一格跑掉了，切到那一格把框拖回正確位置即可`);
-    } catch (e) { vProg('vBlurProg', null); toast(`自動追蹤失敗：${e.message || e}（這個框會固定在原位置）`); }
-    finally { delete m.tracking; vDirty(v); vSaveNow(); paintBlur(i, v); }
-  });
-  return trackQueue;
-}
+const curBoxes = (v) => (v.frameBlur[bSel] ||= []);
+const blurStats = (v) => { const f = (v.frameBlur || []).filter((l) => l.length).length, n = (v.frameBlur || []).reduce((s, l) => s + l.length, 0); return { f, n }; };
 
 function drawBlurEditor(i, v) {
   const a = v.analysis, cv = $('#vBCanvas'); if (!cv || !a) return;
   bSel = Math.min(bSel, a.times.length - 1);
-  const frames = thumbCache.id === i.id ? thumbCache.list : [];
-  if (frames.length) paintBlur(i, v);
-  else { paintBlur(i, v); grabFrames(i, a.times).then(() => paintBlur(i, v)).catch(() => {}); }
+  paintBlur(i, v);
+  if (!(thumbCache.id === i.id && thumbCache.list.length === a.times.length)) grabFrames(i, a.times, (p) => vProg('vBlurProg', p, `讀取畫面 ${Math.round(p * a.times.length)}／${a.times.length}`)).then(() => { vProg('vBlurProg', null); paintBlur(i, v); }).catch(() => vProg('vBlurProg', null));
   const pos = (e) => { const r = cv.getBoundingClientRect(); return [Math.max(0, Math.min(1000, (e.clientY - r.top) / r.height * 1000)), Math.max(0, Math.min(1000, (e.clientX - r.left) / r.width * 1000))]; };
   cv.onpointerdown = (e) => {
     if (!thumbCache.list.length) return;
     e.preventDefault(); cv.setPointerCapture(e.pointerId);
-    const p = pos(e), t = a.times[bSel];
-    const hit = v.manualBlur.slice().reverse().find((m) => { const b = mbBox(m, t); return b && p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3]; });
-    bDrag = hit ? { mode: 'move', m: hit, start: p, box: mbBox(hit, t).slice() } : { mode: 'draw', start: p, box: [p[0], p[1], p[0], p[1]] };
+    const p = pos(e), list = curBoxes(v);
+    const hit = list.slice().reverse().find((b) => p[0] >= b.box[0] && p[0] <= b.box[2] && p[1] >= b.box[1] && p[1] <= b.box[3]);
+    bDrag = hit ? { mode: 'move', b: hit, start: p, orig: hit.box.slice(), box: hit.box.slice() } : { mode: 'draw', start: p, box: [p[0], p[1], p[0], p[1]] };
   };
   cv.onpointermove = (e) => {
     if (!bDrag) return; const p = pos(e);
     if (bDrag.mode === 'draw') bDrag.box = [Math.min(bDrag.start[0], p[0]), Math.min(bDrag.start[1], p[1]), Math.max(bDrag.start[0], p[0]), Math.max(bDrag.start[1], p[1])];
-    else { const b = mbBox(bDrag.m, a.times[bSel]); const dy = Math.max(-b[0], Math.min(1000 - b[2], p[0] - bDrag.start[0])), dx = Math.max(-b[1], Math.min(1000 - b[3], p[1] - bDrag.start[1])); bDrag.box = [b[0] + dy, b[1] + dx, b[2] + dy, b[3] + dx]; }
+    else { const o = bDrag.orig, dy = Math.max(-o[0], Math.min(1000 - o[2], p[0] - bDrag.start[0])), dx = Math.max(-o[1], Math.min(1000 - o[3], p[1] - bDrag.start[1])); bDrag.box = [o[0] + dy, o[1] + dx, o[2] + dy, o[3] + dx]; }
     paintBlur(i, v);
   };
   const end = () => {
-    if (!bDrag) return; const d = bDrag, t = a.times[bSel]; bDrag = null;
+    if (!bDrag) return; const d = bDrag; bDrag = null;
     const box = d.box.map((n) => Math.round(n));
-    if (d.mode === 'draw') {
-      if (box[2] - box[0] < 15 || box[3] - box[1] < 15) { paintBlur(i, v); return; }   // 太小（多半是誤觸）
-      const m = { id: `m${Date.now().toString(36)}`, label: `模糊框 ${v.manualBlur.length + 1}`, keys: [{ t, box }], track: null };
-      v.manualBlur.push(m); runTrack(i, v, m);
-    } else {
-      const old = mbBox(d.m, t); if (!old || Math.abs(old[0] - box[0]) + Math.abs(old[1] - box[1]) < 4) { paintBlur(i, v); return; }   // 只是點一下
-      d.m.keys = d.m.keys.filter((k) => Math.abs(k.t - t) > 0.05).concat([{ t, box }]).sort((x, y) => x.t - y.t);
-      runTrack(i, v, d.m);
-    }
+    if (d.mode === 'draw') { if (box[2] - box[0] >= 15 && box[3] - box[1] >= 15) curBoxes(v).push({ id: uid(), box }); }   // 太小多半是誤觸
+    else d.b.box = box;
+    vDirty(v); vSaveNow(); paintBlur(i, v);
   };
   cv.onpointerup = end; cv.onpointercancel = end;
 }
 function paintBlur(i, v) {
   const a = v.analysis, cv = $('#vBCanvas'); if (!cv || !a) return;
-  const frames = thumbCache.id === i.id ? thumbCache.list : [], t = a.times[bSel], fr = frames[bSel];
+  const frames = thumbCache.id === i.id ? thumbCache.list : [], fr = frames[bSel];
   if (fr && (cv.width !== 360 || cv.height !== Math.round(360 * fr.canvas.height / fr.canvas.width))) { cv.width = 360; cv.height = Math.round(360 * fr.canvas.height / fr.canvas.width); }
   const x = cv.getContext('2d'); x.fillStyle = '#222'; x.fillRect(0, 0, cv.width, cv.height);
   if (!fr) { x.fillStyle = '#aaa'; x.font = `16px ${VFONT}`; x.textAlign = 'center'; x.fillText('讀取畫面中…', cv.width / 2, cv.height / 2); }
   else x.drawImage(fr.canvas, 0, 0, cv.width, cv.height);
   const W = cv.width, H = cv.height, rect = (b) => [b[1] / 1000 * W, b[0] / 1000 * H, (b[3] - b[1]) / 1000 * W, (b[2] - b[0]) / 1000 * H];
-  // 模糊框：半透明填色＋外框（是關鍵位置的那一格用實線，其餘為追蹤結果用虛線）
+  // 上一張有框的位置（淡淡的虛線，方便對齊；不會模糊）
+  for (let k = bSel - 1; k >= 0; k--) {
+    const prev = v.frameBlur[k] || []; if (!prev.length) continue;
+    x.save(); x.strokeStyle = 'rgba(255,255,255,0.75)'; x.lineWidth = 2; x.setLineDash([5, 5]); prev.forEach((b) => { const [rx, ry, rw, rh] = rect(b.box); x.strokeRect(rx, ry, rw, rh); }); x.restore();
+    break;
+  }
   const stage = $('#vBStage'); stage?.querySelectorAll('.vbx').forEach((b) => b.remove());
-  v.manualBlur.forEach((m, n) => {
-    const b = bDrag?.mode === 'move' && bDrag.m === m ? bDrag.box : mbBox(m, t); if (!b) return;
-    const isKey = m.keys.some((k) => Math.abs(k.t - t) < 0.06), [rx, ry, rw, rh] = rect(b);
-    x.save(); x.fillStyle = 'rgba(255,149,0,0.28)'; x.fillRect(rx, ry, rw, rh); x.strokeStyle = '#ff9500'; x.lineWidth = 3; if (!isKey) x.setLineDash([7, 5]); x.strokeRect(rx, ry, rw, rh); x.restore();
-    x.save(); x.font = `700 13px ${VFONT}`; x.fillStyle = '#fff'; x.strokeStyle = 'rgba(0,0,0,0.6)'; x.lineWidth = 3; const lab = m.tracking ? `${m.label}（追蹤中…）` : m.label; x.strokeText(lab, rx + 4, ry + 16); x.fillText(lab, rx + 4, ry + 16); x.restore();
+  curBoxes(v).forEach((b, n) => {
+    const box = bDrag?.mode === 'move' && bDrag.b === b ? bDrag.box : b.box, [rx, ry, rw, rh] = rect(box);
+    x.save(); x.fillStyle = 'rgba(255,149,0,0.3)'; x.fillRect(rx, ry, rw, rh); x.strokeStyle = '#ff9500'; x.lineWidth = 3; x.strokeRect(rx, ry, rw, rh);
+    x.font = `700 13px ${VFONT}`; x.fillStyle = '#fff'; x.strokeStyle = 'rgba(0,0,0,0.6)'; x.lineWidth = 3; x.strokeText(`框 ${n + 1}`, rx + 4, ry + 16); x.fillText(`框 ${n + 1}`, rx + 4, ry + 16); x.restore();
     if (stage) {
       const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'vbx'; btn.textContent = '✕';
-      btn.setAttribute('aria-label', `刪除${m.label}`); btn.title = `刪除${m.label}`;
-      btn.style.left = `${b[3] / 10}%`; btn.style.top = `${b[0] / 10}%`;
-      btn.onclick = (e) => { e.stopPropagation(); v.manualBlur = v.manualBlur.filter((z) => z !== m); vDirty(v); vSaveNow(); paintBlur(i, v); toast(`已刪除${m.label}`); };
+      btn.setAttribute('aria-label', `刪除這一張的框 ${n + 1}`); btn.title = `刪除框 ${n + 1}`;
+      btn.style.left = `${box[3] / 10}%`; btn.style.top = `${box[0] / 10}%`;
+      btn.onclick = (e) => { e.stopPropagation(); const l = curBoxes(v); l.splice(l.indexOf(b), 1); vDirty(v); vSaveNow(); paintBlur(i, v); };
       stage.append(btn);
     }
-    void n;
   });
   if (bDrag?.mode === 'draw') { const [rx, ry, rw, rh] = rect(bDrag.box); x.save(); x.strokeStyle = '#fff'; x.lineWidth = 2; x.setLineDash([6, 4]); x.strokeRect(rx, ry, rw, rh); x.restore(); }
-  // 縮圖：顯示各時間點的框位置
+  // 縮圖：每張只顯示自己的框
   $$('#vFrames canvas').forEach((c) => {
     const k = +c.dataset.fr, f = frames[k], cx = c.getContext('2d'); cx.fillStyle = '#222'; cx.fillRect(0, 0, c.width, c.height);
     if (!f) return; cx.drawImage(f.canvas, 0, 0, c.width, c.height);
-    for (const m of v.manualBlur) { const b = mbBox(m, a.times[k]); if (!b) continue; cx.save(); cx.strokeStyle = '#ff9500'; cx.lineWidth = 2; cx.fillStyle = 'rgba(255,149,0,0.3)'; cx.fillRect(b[1] / 1000 * c.width, b[0] / 1000 * c.height, (b[3] - b[1]) / 1000 * c.width, (b[2] - b[0]) / 1000 * c.height); cx.strokeRect(b[1] / 1000 * c.width, b[0] / 1000 * c.height, (b[3] - b[1]) / 1000 * c.width, (b[2] - b[0]) / 1000 * c.height); cx.restore(); }
+    for (const b of v.frameBlur[k] || []) { const bb = b.box; cx.save(); cx.strokeStyle = '#ff9500'; cx.lineWidth = 2; cx.fillStyle = 'rgba(255,149,0,0.35)'; cx.fillRect(bb[1] / 1000 * c.width, bb[0] / 1000 * c.height, (bb[3] - bb[1]) / 1000 * c.width, (bb[2] - bb[0]) / 1000 * c.height); cx.strokeRect(bb[1] / 1000 * c.width, bb[0] / 1000 * c.height, (bb[3] - bb[1]) / 1000 * c.width, (bb[2] - bb[0]) / 1000 * c.height); cx.restore(); }
   });
-  $$('#vFrames .vbthumb').forEach((b) => b.classList.toggle('on', +b.dataset.k === bSel));
-  const cnt = $('#vBlurCount'); if (cnt) cnt.textContent = `${v.manualBlur.length} 個`;
+  $$('#vFrames .vbthumb').forEach((b) => { const k = +b.dataset.k, n = (v.frameBlur[k] || []).length; b.classList.toggle('on', k === bSel); b.querySelector('span').textContent = `${f1(a.times[k])} 秒${n ? `・${n} 框` : ''}`; });
+  const st = blurStats(v), cnt = $('#vBlurCount'); if (cnt) cnt.textContent = st.n ? `${st.f} 張、${st.n} 個框` : '未框選';
+  const cur = $('#vBCur'); if (cur) cur.textContent = `目前：${f1(a.times[bSel])} 秒（第 ${bSel + 1}／${a.times.length} 張）`;
+  const copyBtn = $('[data-act="vBCopyPrev"]'); if (copyBtn) copyBtn.disabled = !v.frameBlur.slice(0, bSel).some((l) => l.length);
+  const clrBtn = $('[data-act="vBClear"]'); if (clrBtn) clrBtn.disabled = !curBoxes(v).length;
 }
 
 /* ========== 事件 ========== */
@@ -1212,6 +1150,11 @@ Object.assign(ACT, {
   vShotDel(b) { const i = vItem(); if (!i) return; const v = V(i); if (v.plan.shots.length <= 5) { toast('至少要 5 個分鏡'); return; } v.plan.shots.splice(+b.dataset.k, 1); vDirty(v); vSaveNow(); renderVideo(true); },
   vShotUp(b) { const i = vItem(); if (!i) return; const s = V(i).plan.shots, k = +b.dataset.k; if (k < 1) return; [s[k - 1], s[k]] = [s[k], s[k - 1]]; vDirty(V(i)); vSaveNow(); renderVideo(true); },
   vBSel(b) { const i = vItem(); if (!i) return; bSel = +b.dataset.k; paintBlur(i, V(i)); },
+  vBCopyPrev() {
+    const i = vItem(); if (!i) return; const v = V(i);
+    for (let k = bSel - 1; k >= 0; k--) { const prev = v.frameBlur[k] || []; if (!prev.length) continue; curBoxes(v).push(...prev.map((b) => ({ id: uid(), box: b.box.slice() }))); vDirty(v); vSaveNow(); paintBlur(i, v); toast(`已沿用 ${f1(v.analysis.times[k])} 秒的 ${prev.length} 個框，可再拖曳調整位置`); return; }
+  },
+  vBClear() { const i = vItem(); if (!i) return; const v = V(i); v.frameBlur[bSel] = []; vDirty(v); vSaveNow(); paintBlur(i, v); },
   vStop() { vStopAll(); vProg('vRenderProg', null); const i = vItem(); if (i) drawStill(i); },
   async vRender() {
     const i = vItem(); if (!i || !V(i).plan) return;
