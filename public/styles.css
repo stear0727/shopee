@@ -313,3 +313,13 @@ label.inl{display:flex;align-items:center;gap:8px;margin:0}label.inl select{widt
 .vreport{max-height:none}
 .vpoint canvas{display:block;max-width:100%;height:auto;border-radius:10px;touch-action:none;cursor:crosshair}
 .vsave{min-height:56px;font-size:1.1rem;padding:0 28px}
+/* 遮蔽編輯器 */
+.vbstage{position:relative;width:min(100%,360px);margin:8px auto}
+.vbstage canvas{display:block;width:100%;height:auto;border-radius:12px;touch-action:none;cursor:crosshair;background:#222}
+.vbx{position:absolute;transform:translate(-50%,-50%);width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;background:#ff3b30;border:2px solid #fff;color:#fff;font-weight:900;font-size:16px;line-height:1;box-shadow:0 2px 8px rgba(0,0,0,.35);z-index:2}
+.vbx:hover{background:#d70015;border-color:#fff}
+.vbthumbs{grid-template-columns:repeat(auto-fill,minmax(64px,1fr))}
+.vbthumb{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:0;padding:4px;border-radius:10px}
+.vbthumb canvas{display:block;width:100%;height:auto;border-radius:6px}
+.vbthumb span{font-size:.75rem;color:var(--mut)}
+.vbthumb.on{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
