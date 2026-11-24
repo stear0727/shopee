@@ -6,6 +6,8 @@ const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0;
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const fmt = (n, d = 0) => (Number.isFinite(n) ? n.toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
 const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+const isShop = (i) => i?.kind === 'shop';
+const isHttpUrl = (u) => { if (!/^https?:\/\/\S+$/i.test(String(u || ''))) return false; try { const x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') && !!x.hostname; } catch { return false; } };
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const opts = (o, sel) => Object.entries(o).map(([k, v]) => `<option value="${esc(k)}"${k === sel ? ' selected' : ''}>${esc(v)}</option>`).join('');
 const safeUrl = (u) => { u = String(u || '').trim(); return /^https?:\/\/\S+$/i.test(u) ? u.slice(0, 500) : ''; };
@@ -42,7 +44,7 @@ const autoCat = (name, cat = '') => {
   for (const [c, re] of CAT_RE) if (re.test(s)) return c;
   return '其他';
 };
-const EXTRA = ['shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText', 'schedAt'];
+const EXTRA = ['kind', 'festTag', 'shop', 'aff', 'queuedAt', 'publishedAt', 'aiAt', 'aiFest', 'discount', 'rating', 'sales', 'trend', 'summary', 'url', 'src', 'aiText', 'schedAt'];
 const numOr = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? '' : Number(v));
 const kfmt = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : fmt(n));
 const catClass = (c) => { let h = 0; for (const ch of String(c || '')) h = (h + ch.codePointAt(0)) % 6; return 'k' + h; };
@@ -296,7 +298,7 @@ function importShopee(rows) {
     const price = num(String(r['商品價格'] || '').replace(/[$,s]/g, '')), sales = salesNum(r['銷售量']);
     const shop = String(r['商店名稱'] || '').trim().slice(0, 80), aff = safeUrl(r['推廣連結']), rate = num(String(r['分潤率'] || '').replace('%', ''));
     vals.push({ price, sales: num(sales), comm: commOf({ price, base: rate }) });
-    const old = items.find((i) => (id && i.id === id) || (pid && (String(i.url).match(/(\d+)$/) || [])[1] === pid) || keyOf(i.name) === keyOf(name));
+    const old = items.find((i) => !isShop(i) && ((id && i.id === id) || (pid && (String(i.url).match(/(\d+)$/) || [])[1] === pid) || keyOf(i.name) === keyOf(name)));
     if (old) {
       // 與上次匯入比較：價格上漲 10% 以上、分潤率下降 → 風險標記；銷量變化 → 趨勢
       const risk = [];
@@ -358,7 +360,7 @@ function makeItem(p) {
   for (const k of EXTRA) it[k] = p[k] ?? '';
   return it;
 }
-function rescore(i) { const r = scoreOf(i); i.total = r.total; i.grade = r.grade; i.rate = num(i.base) + num(i.xtra); }
+function rescore(i) { if (isShop(i)) return; const r = scoreOf(i); i.total = r.total; i.grade = r.grade; i.rate = num(i.base) + num(i.xtra); }
 /* ========== AI 文案 ========== */
 // AI 回傳的欄位轉成可顯示的文字：空值（null）不顯示，物件／陣列只取裡面的文字
 function aiTxt(x) {
@@ -444,8 +446,8 @@ function setStatus(i, s) {
 const queue = (i) => { if (!INQ(i) && i.status !== 'done') setStatus(i, i.aiText ? 'copy' : 'todo'); };
 function updPickBtn() { const b = $('#pickBtn'); if (b) { b.textContent = `加入發布清單（${picked.size}）`; b.disabled = !picked.size; } }
 function updPubBtns() {
-  const sel = items.filter((i) => pubPicked.has(i.id)), nd = sel.filter(INQ).length, dn = sel.filter((i) => i.status === 'done').length;
-  for (const [id, l, c] of [['pubGenBtn', '批次產生文案', batchRunning ? 0 : nd], ['pubDoneBtn', '標記已發布', nd], ['pubUndoBtn', '取消已發布', dn], ['pubOutBtn', '移出清單', sel.length]]) { const b = document.getElementById(id); if (b) { b.textContent = l + '（' + c + '）'; b.disabled = !c; } }
+  const sel = items.filter((i) => pubPicked.has(i.id)), nd = sel.filter(INQ).length, dn = sel.filter((i) => i.status === 'done').length, ng = sel.filter((i) => INQ(i) && !isShop(i)).length;
+  for (const [id, l, c] of [['pubGenBtn', '批次產生文案', batchRunning ? 0 : ng], ['pubDoneBtn', '標記已發布', nd], ['pubUndoBtn', '取消已發布', dn], ['pubOutBtn', '移出清單', sel.length]]) { const b = document.getElementById(id); if (b) { b.textContent = l + '（' + c + '）'; b.disabled = !c; } }
 }
 // 產生文案視窗裡的「節慶活動」區塊：預設帶入近三週節慶，可修改或取消
 const festForm = () => `<div class="fest-box">
@@ -504,6 +506,7 @@ function bestTimeOf(i) {
   return m ? aiTxt(m[1]) : '';
 }
 function pubRow(i) {
+  if (isShop(i)) return shopRow(i);
   const id = esc(i.id), done = i.status === 'done';
   return `<article class="pc pub${done ? ' isdone' : ''}">
     <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
@@ -524,11 +527,48 @@ function pubRow(i) {
   </article>`;
 }
 
+// 賣場卡片：只有名稱、節慶標籤、推廣連結（不產生 AI 文案，推廣連結不送 AI）
+function shopRow(i) {
+  const id = esc(i.id), done = i.status === 'done';
+  return `<article class="pc pub shopc${done ? ' isdone' : ''}">
+    <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="tag shoptag">🏪 賣場</span>${i.festTag ? ` <span class="tag festtag">🎉 ${esc(i.festTag)}</span>` : ''}</span></div>
+    <h3>${esc(i.name)}</h3>
+    <div class="pc-row sm"><span class="muted shopurl" title="${esc(i.aff)}">${esc(i.aff)}</span></div>
+    <div class="pc-row"><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `待發布｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
+    ${pubTimeHtml(i)}
+    <div class="acts">
+      ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button><button type="button" data-act="schedOpen" data-id="${id}">${okSlot(i.schedAt) ? '修改排定時間' : '排定時間'}</button>`}
+      ${isHttpUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
+      ${done ? '' : `<button type="button" class="ghost" data-act="unqueue" data-id="${id}">移出清單</button>`}
+    </div>
+  </article>`;
+}
+// 新增賣場表單：手機為全螢幕面板，電腦為對話框；節慶選項來自檔期表（未來一年，依日期排序）
+function shopDlg() {
+  const d = $('#dlg'), seen = new Set();
+  const fests = festivals(366).filter((f) => !seen.has(f.name) && seen.add(f.name));
+  d.innerHTML = `<div class="dlg-head"><h2>＋新增賣場</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+    <form id="shopForm" novalidate>
+      <label>賣場名稱 <span class="req">必填</span><input id="shopName" maxlength="200" autocomplete="off" placeholder="例如：花漾美肌旗艦店" aria-describedby="shopNameErr"></label>
+      <p id="shopNameErr" class="ferr" role="alert" hidden></p>
+      <label>推廣連結 <span class="req">必填</span><input id="shopUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://" aria-describedby="shopUrlErr"></label>
+      <p id="shopUrlErr" class="ferr" role="alert" hidden></p>
+      <label>節慶標籤（選填）<select id="shopFest"><option value="">不指定</option>${fests.map((f) => `<option value="${esc(f.name)}">${esc(f.name)}（${esc(f.date)}）</option>`).join('')}</select></label>
+      <p class="hint">推廣連結只會保存與複製，不會被修改，也不會傳送給 AI。</p>
+      <div class="btns"><button type="submit" class="pri">新增到發布清單</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
+    </form>`;
+  d.classList.add('sheet');
+  if (!d.open) d.showModal();
+  setTimeout(() => $('#shopName')?.focus(), 30);
+}
+// 刪除賣場（同步時會自動記入刪除紀錄，另一台裝置同步後也會刪除）
+function dropShops(ids) { items = items.filter((x) => !ids.has(x.id)); for (const id of ids) pubPicked.delete(id); }
+
 let catSel = 'all', gradeSel = 'all', shownIds = [];
 function renderList() {
   // 類別按鈕：點選即顯示該類別排行（件數依類別多寡排序，「其他」放最後）
   const cnt = {};
-  for (const i of items) if (i.status !== 'drop') cnt[i.category || '未分類'] = (cnt[i.category || '未分類'] || 0) + 1;
+  for (const i of items) if (i.status !== 'drop' && !isShop(i)) cnt[i.category || '未分類'] = (cnt[i.category || '未分類'] || 0) + 1;
   const cats = Object.keys(cnt).sort((a, b) => (a === '其他') - (b === '其他') || cnt[b] - cnt[a]);
   if (catSel !== 'all' && !cnt[catSel]) catSel = 'all';
   const total = Object.values(cnt).reduce((s, n) => s + n, 0);
@@ -536,7 +576,7 @@ function renderList() {
     .map(([k, l, n]) => `<button type="button" role="tab" data-act="catSel" data-c="${esc(k)}" aria-selected="${catSel === k}">${esc(l)} <span class="n">${n}</span></button>`).join('');
   calcRec();
   const q = norm($('#listQ').value), c = catSel;
-  const inCat = items.filter((i) => (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)));
+  const inCat = items.filter((i) => !isShop(i) && (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)));
   // 等級篩選：件數依目前類別與搜尋條件計算
   const gc = { S: 0, A: 0, B: 0, C: 0 };
   inCat.forEach((i) => { if (gc[i.grade] != null) gc[i.grade]++; });
@@ -703,6 +743,7 @@ function softRefresh() {
   pendingRender = false;
   const y = window.scrollY; RENDER[v](); window.scrollTo(0, y);
 }
+$('#dlg').addEventListener('close', () => { $('#dlg').classList.remove('sheet'); });
 $('#dlg').addEventListener('close', () => { if (pendingRender) setTimeout(softRefresh, 50); });
 document.addEventListener('focusout', () => { if (pendingRender) setTimeout(softRefresh, 50); });
 
@@ -744,7 +785,7 @@ const ACT = {
   // 批次產生文案：先設定節慶段落（全部共用），再逐件呼叫 AI
   pubGenSel() {
     if (batchRunning) { toast('批次產生中，請稍候'); return; }
-    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i)); if (!list.length) return;
+    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i) && !isShop(i)); if (!list.length) return;
     const has = list.filter((i) => i.aiText).length, d = $('#dlg');
     d.innerHTML = `<div class="dlg-head"><h2>批次產生文案（${list.length} 件）</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
       <p class="hint">會一件一件請 AI 產生文案，每件約 10–20 秒。產生中可以關閉這個視窗，完成後會通知你。</p>
@@ -757,7 +798,7 @@ const ACT = {
   async batchGo(b) {
     if (batchRunning) return;
     const redo = $('#batchRedo')?.checked, want = $('#festOn').checked, fest = want ? ($('#festText').value.trim() || festAuto()) : '';
-    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i) && (redo || !i.aiText));
+    const list = items.filter((i) => pubPicked.has(i.id) && INQ(i) && !isShop(i) && (redo || !i.aiText));
     if (!list.length) { toast('選取的商品都已有文案'); return; }
     batchRunning = true; batchStop = false; b.disabled = true; updPubBtns();
     const st = Object.fromEntries(list.map((i) => [i.id, '等待中']));
@@ -843,7 +884,8 @@ const ACT = {
   pubOutSel() {
     const list = items.filter((i) => pubPicked.has(i.id) && INPUB(i)); if (!list.length) return;
     if (!confirm(`將 ${list.length} 件移出發布清單？`)) return;
-    list.forEach((i) => setStatus(i, 'watch')); pubPicked.clear(); save.i(); renderPub();
+    const gone = new Set(list.filter(isShop).map((i) => i.id)); if (gone.size) dropShops(gone);
+    list.filter((i) => !isShop(i)).forEach((i) => setStatus(i, 'watch')); pubPicked.clear(); save.i(); renderPub();
   },
   scoreHelp() {
     const sw = DIMS.reduce((t, d) => t + num(S.weights[d.k]), 0) || 1, T = thr();
@@ -863,14 +905,33 @@ const ACT = {
     if (!d.open) d.showModal();
   },
   recalAll() {
-    const c = calibrate(items.map((i) => ({ price: num(i.price), sales: num(i.sales), comm: commOf(i) })));
+    const c = calibrate(items.filter((i) => !isShop(i)).map((i) => ({ price: num(i.price), sales: num(i.sales), comm: commOf(i) })));
     if (!c.ok) { toast(`目前只有 ${c.n} 件商品，少於 ${MIN_BATCH} 件，無法重算門檻`); return; }
     items.forEach(rescore); save.i(); renderSettings(); toast(`已用全部 ${c.n} 件商品重算門檻`);
   },
   resetThr() { delete S.thr; save.s(); items.forEach(rescore); save.i(); renderSettings(); toast('已恢復預設門檻'); },
   publish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'done'); save.i(); route(); toast(`已標記發布：${fmtDT(i.publishedAt)}`); },
   unpublish(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, i.aiText ? 'copy' : 'todo'); save.i(); route(); },
-  unqueue(b) { const i = items.find((x) => x.id === b.dataset.id); if (!i) return; setStatus(i, 'watch'); save.i(); route(); },
+  unqueue(b) {
+    const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
+    if (isShop(i)) { if (!confirm(`將賣場「${i.name}」移出發布清單？（會刪除這筆賣場）`)) return; dropShops(new Set([i.id])); save.i(); route(); return; }
+    setStatus(i, 'watch'); save.i(); route();
+  },
+  // 新增賣場
+  shopNew() { shopDlg(); },
+  shopSave() {
+    const name = $('#shopName').value.trim(), url = $('#shopUrl').value.trim(), fest = $('#shopFest').value;
+    const n = [...name].length;
+    const errN = !name ? '請輸入賣場名稱' : n > 60 ? `賣場名稱最多 60 字（目前 ${n} 字）` : '';
+    const errU = !url ? '請輸入推廣連結' : !isHttpUrl(url) ? '推廣連結必須是 http:// 或 https:// 開頭的完整網址（中間不能有空白）' : url.length > 2000 ? '推廣連結太長（最多 2000 字元）' : '';
+    for (const [id, msg] of [['shopNameErr', errN], ['shopUrlErr', errU]]) { const e = document.getElementById(id); e.textContent = msg; e.hidden = !msg; }
+    $('#shopName').setAttribute('aria-invalid', String(!!errN)); $('#shopUrl').setAttribute('aria-invalid', String(!!errU));
+    if (errN || errU) { (errN ? $('#shopName') : $('#shopUrl')).focus(); return; }
+    const now = new Date().toISOString();
+    // 推廣連結原樣保存（只去掉前後空白），不縮短、不加參數
+    items.push({ id: 'shop_' + uid(), kind: 'shop', name, shop: name, aff: url, festTag: fest, category: '賣場', status: 'todo', queuedAt: now, createdAt: now, note: '' });
+    save.i(); $('#dlg').close(); pubSel = 'all'; go('#pub'); toast(`已新增賣場「${name}」到發布清單`);
+  },
   editItem(b) { editItem(b.dataset.id); },
   delItem(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && confirm(`確定刪除「${i.name}」？`)) { items = items.filter((x) => x !== i); save.i(); renderList(); } },
   delAll() { if (items.length && confirm(`確定刪除全部 ${items.length} 件商品？建議先匯出備份。`)) { items = []; save.i(); renderList(); } },
@@ -895,6 +956,7 @@ const ACT = {
   },
 };
 
+document.addEventListener('submit', (e) => { if (e.target.id === 'shopForm') { e.preventDefault(); ACT.shopSave(); } });
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const f = ACT[b.dataset.act]; if (f) f(b, e);
