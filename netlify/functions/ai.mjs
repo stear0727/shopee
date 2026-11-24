@@ -66,13 +66,13 @@ carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${
       const dur = Math.max(14, Math.min(19, n(p.seconds) || 17));
       const style = new RegExp(`^(${VIDEO_STYLES})$`).test(p.style) ? p.style : '';
       return { json: true, sys: VSYS, fast: true, perTry: 12000, models: [process.env.GEMINI_VIDEO_MODEL, ...VIDEO_MODELS], text: `請依使用者的提示詞，為一支商品實拍影片設計 9:16 直式、總長 ${dur} 秒左右的特色銷售短影音。你看不到影片，只能依提示詞判斷。
-影片名稱：${s(p.name, 60) || '（未命名）'}；實拍素材長度 ${n(p.duration)} 秒。
+實拍素材長度 ${n(p.duration)} 秒。
 使用者的提示詞：${s(p.prompt, 1500)}
 ${style ? `使用者指定風格：${style}` : `風格請從以下選一個最有記憶點、最貼合商品核心感受或賣點的：${VIDEO_STYLES}（weather 氣象播報、meme 迷因爆笑、trailer 電影預告、neon 深夜霓虹、fighter 格鬥遊戲對決、kraft 牛皮紙手繪、thermal 熱感應鏡頭、dating 交友配對）`}
 只輸出 JSON：
 {"prohibited":{"blocked":false,"reason":"若商品屬於台灣法規禁止廣告或不得一般廣告的類別（例如一歲以下嬰兒配方奶粉、處方藥、菸品、電子煙），blocked 為 true 並說明；否則 false、空字串"},
 "safety":"若商品有安全疑慮（刀具、電器、高溫、化學清潔劑、易燃、兒童誤食等），寫一句使用提醒（20 字內）；沒有就空字串",
-"style":"${style || '風格代碼'}","styleReason":"為什麼選這個風格（30 字內）","story":"分鏡劇情一句話（40 字內）",
+"product":"從提示詞找出的商品名稱（10 字內，提示詞沒寫就空字串）","style":"${style || '風格代碼'}","styleReason":"為什麼選這個風格（30 字內）","story":"分鏡劇情一句話（40 字內）",
 "shots":[{"role":"hook|intro|point|cta","caption":"畫面大字，2–12 字","sub":"畫面小字，0–18 字，可空字串","start":素材起始秒數,"move":"push|pull|panL|panR|panU|panD|static","fx":"bounce|flash|shake|fade|zoom","demo":false,"source":"文案依據：引用提示詞中的原文；開場痛點寫『情境描述』"}],
 "cta":"結尾購買引導，例如『現在就入手！』",
 "hashtags":["#關鍵字1","#關鍵字2","#關鍵字3","#關鍵字4","#關鍵字5"]}

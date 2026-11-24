@@ -549,8 +549,9 @@ function drawFrame(ctx, t, R, elFor) {
   const S = {
     t, lt, d: shot.d, k: shot.k, n: shots.length, shot, shots, layout: [],
     caption: shot.role === 'cta' && !shot.caption ? (R.plan.cta || '現在就入手！') : shot.caption,
-    sub: shot.sub, short: (R.i.name || '本商品').slice(0, 10),
-    ticker: (v.desc || R.i.name || '').replace(/\s+/g, ' ').slice(0, 90),
+    // 畫面上只用提示詞裡的資訊，不使用上傳的影片檔名
+    sub: shot.sub, short: (R.plan.product || '本商品').slice(0, 10),
+    ticker: (v.desc || R.plan.product || '').replace(/\s+/g, ' ').slice(0, 90),
     pop: shot.fx === 'bounce' ? 0.6 + 0.4 * springy((lt - 0.08) / 0.5) : 1,
   };
   STYLE_DRAW[R.plan.style] ? STYLE_DRAW[R.plan.style](ctx, S) : STYLE_DRAW.weather(ctx, S);
@@ -804,7 +805,7 @@ async function runPlan(btn) {
   vBusy = 'plan'; btn.disabled = true; $('#vPlanErr').innerHTML = '';
   let stop = tick('vPlanProg', 0.05, 0.95, 15, 'AI 正在挑選風格、設計分鏡');
   try {
-    const payload = { prompt: (v.desc || '').slice(0, 1500), name: i.name === '未命名影片' ? '' : i.name, seconds: v.seconds, style: v.style, duration: v.src?.duration || 0 };
+    const payload = { prompt: (v.desc || '').slice(0, 1500), seconds: v.seconds, style: v.style, duration: v.src?.duration || 0 };   // 不送出影片檔名
     // Google 忙碌（high demand／overloaded）或逾時時自動重試，等待時間逐次拉長
     const WAITS = [5, 10, 15, 20];
     let j;
@@ -845,7 +846,7 @@ function normPlan(o, v) {
   shots = shots.map((s) => ({ ...s, dur: Math.round(each * 10) / 10 }));
   const tags = [...new Set((Array.isArray(o.hashtags) ? o.hashtags : []).map((x) => `#${aiTxt(x).replace(/^#+/, '').replace(/[\s#,，、]+/g, '')}`).filter((x) => x.length > 1))].slice(0, 5);
   return { style, styleReason: aiTxt(o.styleReason).slice(0, 60), story: aiTxt(o.story).slice(0, 80), cta: aiTxt(o.cta).slice(0, 16) || '現在就入手！', hashtags: tags, shots,
-    safety: aiTxt(o.safety).slice(0, 30), prohibited: { blocked: !!o.prohibited?.blocked, reason: aiTxt(o.prohibited?.reason).slice(0, 200) } };
+    product: aiTxt(o.product).slice(0, 10), safety: aiTxt(o.safety).slice(0, 30), prohibited: { blocked: !!o.prohibited?.blocked, reason: aiTxt(o.prohibited?.reason).slice(0, 200) } };
 }
 
 /* ========== 關鍵畫面檢查 ========== */
