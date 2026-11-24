@@ -382,6 +382,7 @@ function renderAnalyze(j, p) {
     if (long) outText.postLong = long;
     const car = Array.isArray(o.carousel) ? o.carousel : [];
     const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).map(aiTxt).filter(Boolean).join(' ');
+    outText.tags = tags;
     const replies = Array.isArray(o.replies) ? o.replies : [];
     const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' && o.festivalPost.post.trim() ? o.festivalPost : null;
     if (fp) outText.postFest = fp.post;
@@ -389,17 +390,17 @@ function renderAnalyze(j, p) {
     ${fp ? `<h3>🎉 節慶活動文案（${esc(fp.festival || '近期節慶')}）</h3><div class="post fest"><p>${esc(fp.post)}</p><button type="button" data-act="copy" data-k="postFest">複製</button></div>` : ''}
     ${posts.length ? `<h3>短貼文（Threads／IG／FB，可直接複製）</h3>${posts.map((x, n) => `<div class="post"><p>${esc(x)}</p><button type="button" data-act="copy" data-k="post${n}">複製</button></div>`).join('')}` : ''}
     ${long ? `<h3>心得長文（FB 社團／Dcard）</h3><div class="post"><p>${esc(long)}</p><button type="button" data-act="copy" data-k="postLong">複製</button></div>` : ''}
+    ${tags ? `<h3>Hashtag</h3><div class="post"><p>${esc(tags)}</p><button type="button" data-act="copy" data-k="tags">複製</button></div>` : ''}
     <h3>吸睛第一句</h3>${L(o.headlines || o.hooks)}
     ${car.length ? `<h3>IG 多圖輪播規劃</h3><div class="tw"><table><thead><tr><th>張數</th><th>圖上大字</th><th>說明</th></tr></thead><tbody>${car.map((s, n) => `<tr><td>${esc(s?.slide || `第 ${n + 1} 張`)}</td><td>${esc(aiTxt(s?.title))}</td><td>${esc(aiTxt(s?.text))}</td></tr>`).join('')}</tbody></table></div>` : ''}
     <h3>實拍照片建議</h3>${L(o.imageIdeas)}
     <div class="grid2"><div><h3>優勢</h3>${L(o.strengths)}</div><div><h3>風險</h3>${L(o.risks)}</div></div>
     <h3>CTA 與連結放置</h3><p>${esc(aiTxt(o.cta))}</p>
-    <h3>Hashtag</h3><p>${esc(tags)}</p>
     ${aiTxt(o.bestTime) ? `<h3>建議發文時段</h3><p>${esc(aiTxt(o.bestTime))}</p>` : ''}
     ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
     const ls = (a) => (Array.isArray(a) ? a.map(aiTxt).filter(Boolean).map((x) => `- ${x}`).join('\n') : '');
-    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\nHashtag：${tags}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>`; t = j.text + `\n\nSub_id：${sub}`; }
   if (safeUrl(p.aff)) { outText.aff = p.aff; h += `<h3>推廣連結</h3><div class="post"><p>${esc(p.aff)}</p><button type="button" data-act="copy" data-k="aff">複製</button></div>`; t += `\n推廣連結：${p.aff}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
