@@ -312,3 +312,4 @@ label.inl{display:flex;align-items:center;gap:8px;margin:0}label.inl select{widt
 .vkey figcaption{display:flex;flex-direction:column;gap:2px;padding:6px 8px;font-size:.75rem}
 .vreport{max-height:none}
 .vpoint canvas{display:block;max-width:100%;height:auto;border-radius:10px;touch-action:none;cursor:crosshair}
+.vsave{min-height:56px;font-size:1.1rem;padding:0 28px}

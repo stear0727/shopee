@@ -78,18 +78,46 @@ async function srcURL(i) {
 }
 // 原始影片一律靜音：即使使用者在預覽播放器上把聲音打開，也會立刻再關掉
 function forceMute(el) { el.muted = true; el.defaultMuted = true; el.volume = 0; el.addEventListener('volumechange', () => { if (!el.muted || el.volume) { el.muted = true; el.volume = 0; } }); return el; }
-function mkVideo(url) { const el = forceMute(document.createElement('video')); el.playsInline = true; el.preload = 'auto'; el.crossOrigin = 'anonymous'; el.src = url; return el; }
-const vidReady = (el) => new Promise((res, rej) => {
-  if (el.readyState >= 2) return res();
-  el.onloadeddata = () => res();
-  el.onerror = () => rej(new Error('這支影片在瀏覽器裡無法播放，請轉成 MP4（H.264）後再上傳'));
-  setTimeout(res, 15000);
+const UA = navigator.userAgent;
+const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (/Macintosh/.test(UA) && navigator.maxTouchPoints > 1);
+const IS_MOBILE = IS_IOS || /Android|Mobile/i.test(UA);
+// 電腦版 Chrome／Edge 的 H.264 編碼器第一次啟動較慢，才需要暖機（iOS 上的 Chrome 也是 Safari 核心，不需要）
+const NEEDS_WARMUP = /Chrome\/|Edg\//.test(UA) && !IS_MOBILE;
+function mkVideo(url) {
+  const el = forceMute(document.createElement('video'));
+  el.playsInline = true; el.setAttribute('playsinline', ''); el.setAttribute('muted', ''); el.preload = 'auto'; el.crossOrigin = 'anonymous'; el.src = url;
+  return el;
+}
+const waitEv = (el, ev, ms) => new Promise((res) => { const f = () => { el.removeEventListener(ev, f); clearTimeout(tm); res(); }; const tm = setTimeout(f, ms); el.addEventListener(ev, f); });
+// iPhone（Safari）在影片真正播放之前不會解出任何畫面，畫到畫布上會是黑的：先靜音播放一下再暫停
+const vidHolder = () => { let h = document.getElementById('vVidHolder'); if (!h) { h = document.createElement('div'); h.id = 'vVidHolder'; h.setAttribute('aria-hidden', 'true'); Object.assign(h.style, { position: 'fixed', left: '0', top: '0', width: '2px', height: '2px', overflow: 'hidden', opacity: '0', pointerEvents: 'none' }); document.body.append(h); } return h; };
+async function primeVideo(el) {
+  if (el._primed) return; el._primed = true;
+  if (!el.isConnected) { Object.assign(el.style, { width: '2px', height: '2px' }); vidHolder().append(el); }
+  try { await el.play(); } catch { /* 不能播放時改用預設流程 */ }
+  el.pause();
+}
+const vidReady = async (el) => {
+  if (el.readyState < 1) await new Promise((res, rej) => {
+    const ok = () => { el.removeEventListener('loadedmetadata', ok); res(); };
+    el.addEventListener('loadedmetadata', ok);
+    el.onerror = () => rej(new Error('這支影片在瀏覽器裡無法播放，請轉成 MP4（H.264）後再上傳'));
+    setTimeout(res, 15000);
+  });
+  if (el.readyState < 2) { el.load?.(); }
+  await primeVideo(el);
+  if (el.readyState < 2) await waitEv(el, 'loadeddata', 8000);
+};
+// 等到新位置的畫面真的解出來（有 requestVideoFrameCallback 的瀏覽器會等到那一格畫面送出）
+const frameReady = (el) => new Promise((res) => {
+  if (!el.requestVideoFrameCallback) return setTimeout(res, IS_IOS ? 120 : 0);
+  const tm = setTimeout(res, 600); el.requestVideoFrameCallback(() => { clearTimeout(tm); res(); });
 });
 function seekTo(el, t) {
   return new Promise((res) => {
     const target = Math.max(0, Math.min(t, (el.duration || 0) - 0.05));
     if (Math.abs(el.currentTime - target) < 0.01 && el.readyState >= 2) return res();
-    const done = () => { el.removeEventListener('seeked', done); clearTimeout(tm); res(); };
+    const done = () => { el.removeEventListener('seeked', done); clearTimeout(tm); frameReady(el).then(res); };
     const tm = setTimeout(done, 4000);
     el.addEventListener('seeked', done); el.currentTime = target;
   });
@@ -109,7 +137,7 @@ async function grabFrames(i, times, onStep) {
   const el = mkVideo(url); await vidReady(el);
   const out = [];
   for (const [k, t] of times.entries()) { await seekTo(el, t); out.push(grabSnap(el, 512, 0.7)); onStep?.((k + 1) / times.length); }
-  el.removeAttribute('src'); el.load();
+  el.removeAttribute('src'); el.load(); el.remove();
   thumbCache = { id: i.id, list: out };
   return out;
 }
@@ -506,7 +534,7 @@ function drawFrame(ctx, t, R, elFor) {
     const r = rng(3); ctx.fillStyle = 'rgba(90,60,20,0.08)'; for (let q = 0; q < 500; q++) ctx.fillRect(r() * VW, r() * VH, 2 + r() * 3, 2 + r() * 3);
   }
   // 震動
-  if (shot.fx === 'shake' && lt < 0.45) { const a = (1 - lt / 0.45) * 16; ctx.translate(Math.sin(lt * 90) * a, Math.cos(lt * 70) * a); }
+  if (!R.holding && shot.fx === 'shake' && lt < 0.45) { const a = (1 - lt / 0.45) * 16; ctx.translate(Math.sin(lt * 90) * a, Math.cos(lt * 70) * a); }
   const fr = st.frame || [0, 0, VW, VH];
   if (el && el.readyState >= 2) {
     processFrame(R, el, el.currentTime);
@@ -536,8 +564,8 @@ function drawFrame(ctx, t, R, elFor) {
   if (shot.role === 'cta' && R.plan.safety) txt(ctx, S, '安全提醒', `⚠ ${R.plan.safety}`, 540, shot.demo ? 1810 : 1862, { size: 30, weight: 700, color: '#fff', bg: 'rgba(0,0,0,0.6)', padX: 16, padY: 6, radius: 10, maxW: 1000, lines: 1 });
   ctx.restore();
   // 轉場特效
-  if (shot.fx === 'flash' && lt < 0.28) { ctx.fillStyle = `rgba(255,255,255,${0.9 * (1 - lt / 0.28)})`; ctx.fillRect(0, 0, VW, VH); }
-  if (shot.fx === 'fade' && shot.k === 0 && lt < 0.35) { ctx.fillStyle = `rgba(0,0,0,${1 - lt / 0.35})`; ctx.fillRect(0, 0, VW, VH); }
+  if (!R.holding && shot.fx === 'flash' && lt < 0.28) { ctx.fillStyle = `rgba(255,255,255,${0.9 * (1 - lt / 0.28)})`; ctx.fillRect(0, 0, VW, VH); }
+  if (!R.holding && shot.fx === 'fade' && shot.k === 0 && lt < 0.35) { ctx.fillStyle = `rgba(0,0,0,${1 - lt / 0.35})`; ctx.fillRect(0, 0, VW, VH); }
   if (t > R.total - 0.35) { ctx.fillStyle = `rgba(0,0,0,${(t - (R.total - 0.35)) / 0.35})`; ctx.fillRect(0, 0, VW, VH); }
   return S;
 }
@@ -709,7 +737,7 @@ function renderVideo(force) {
     <div class="vstage"><canvas id="vCanvas" width="${VW}" height="${VH}" aria-label="影片預覽"></canvas></div>
     <div class="btns"><button type="button" data-act="vPlay"${blocked ? ' disabled' : ''}>▶ 預覽</button><button type="button" class="ghost" data-act="vStop">■ 停止</button><button type="button" class="pri" data-act="vRender"${v.checked && !blocked ? '' : ' disabled'}>輸出 MP4</button></div>
     ${v.checked ? '' : '<p class="hint warn">請先完成「4. 關鍵畫面檢查」並確認版面。</p>'}
-    <p class="hint">輸出 1080×1920、30fps。輸出是即時錄製，影片多長就要錄多久，錄製時請停留在這個分頁；第一次輸出會先暖機約 4 秒。</p>
+    <p class="hint">輸出 1080×1920、30fps。電腦版會先問你要存在哪裡，錄完直接存檔；手機版錄完點「儲存到相簿」。輸出是即時錄製，影片多長就要錄多久，錄製時請停留在這個頁面、不要鎖定螢幕。</p>
     <div id="vRenderProg" class="vprog-box"></div><div id="vOut"></div>
     <h3>交付說明</h3><div class="pre vreport" id="vReport">${esc(reportText(i, v))}</div>
     <div class="btns"><button type="button" data-act="vCopyReport">複製交付說明</button></div></div>`;
@@ -839,7 +867,7 @@ async function runKeys(btn) {
       const th = document.createElement('canvas'); th.width = 270; th.height = 480; th.getContext('2d').drawImage(c, 0, 0, 270, 480);
       res.push({ s, url: th.toDataURL('image/jpeg', 0.82), issues, active });
     }
-    el.removeAttribute('src'); el.load();
+    el.removeAttribute('src'); el.load(); el.remove();
     const total = res.reduce((n, r) => n + r.issues.length, 0);
     out.innerHTML = res.map((r) => `<figure class="vkey${r.issues.length ? ' bad' : ''}"><img src="${r.url}" alt="分鏡 ${r.s.k + 1} 關鍵畫面"><figcaption><b>分鏡 ${r.s.k + 1}｜${esc(ROLES[r.s.role])}</b>
       ${r.issues.length ? r.issues.map((x) => `<span class="warn">⚠ ${esc(x)}</span>`).join('') : '<span class="pubok">✓ 版面沒有偵測到問題</span>'}
@@ -862,10 +890,47 @@ async function drawStill(i) {
     const el = mkVideo(url); await vidReady(el);
     const R = buildRender(i, []); const s = R.shots[Math.min(1, R.shots.length - 1)]; const lt = Math.min(1.3, s.d - 0.3);
     await seekTo(el, s.srcStart + lt * s.rate); drawFrame(ctx, s.t0 + lt, R, el);
-    el.removeAttribute('src'); el.load();
+    el.removeAttribute('src'); el.load(); el.remove();
   } catch { /* 預覽圖失敗不影響操作 */ }
 }
-async function runPlayback(record) {
+const recMime = () => ['video/mp4;codecs=avc1.42E01F,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm']
+  .find((x) => window.MediaRecorder && MediaRecorder.isTypeSupported(x)) || '';
+const outName = (i, v, ext) => `${String(i.name).replace(/[\\/:*?"<>|]+/g, '').slice(0, 24)}_${STYLES[v.plan.style].name}_${today()}.${ext}`;
+let lastOut = null;   // 最後一次輸出的影片（手機版存到相簿要再點一下時使用）
+// 存檔：電腦版寫進輸出前選好的位置（或直接下載）；手機版跳出分享選單，選「儲存影片」就會存進相簿
+async function deliver(blob, name, ext, handle, total) {
+  const pid = 'vRenderProg', size = `${(blob.size / 1048576).toFixed(1)} MB`, done = `✓ 輸出完成：${f1(total)} 秒、1080×1920、${ext.toUpperCase()}、${size}`;
+  const webmNote = ext === 'webm' ? '<p class="hint warn">這個瀏覽器只能輸出 WebM，請改用 Chrome、Edge 或 iPhone 的 Safari 輸出 MP4。</p>' : '';
+  lastOut = { blob, name, ext };
+  if (handle) {
+    try { const w = await handle.createWritable(); await w.write(blob); await w.close(); vProg(pid, 1, `${done}，已存到你選的位置`); $('#vOut').innerHTML = `<p class="pubok">✓ 已儲存「${esc(handle.name || name)}」</p>${webmNote}`; return; }
+    catch (e) { toast(`無法寫入選擇的位置（${e.message || e.name}），改用下載`); }
+  }
+  if (IS_MOBILE) {
+    vProg(pid, 1, done);
+    $('#vOut').innerHTML = `<div class="btns"><button type="button" class="pri vsave" data-act="vSaveOut">📥 儲存到相簿</button></div>
+      <p class="hint">${IS_IOS ? '點一下後在分享選單選「儲存影片」，就會存進相簿。' : '點一下後選擇要存放的位置或 App。'}（瀏覽器規定存檔前需要點一下）</p>${webmNote}`;
+    return;
+  }
+  downloadBlob(blob, name);
+  vProg(pid, 1, `${done}，已下載`);
+  $('#vOut').innerHTML = `<p class="pubok">✓ 已下載「${esc(name)}」</p><div class="btns"><button type="button" class="ghost" data-act="vSaveOut">再下載一次</button></div>${webmNote}`;
+}
+function downloadBlob(blob, name) {
+  const u = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = u; a.download = name; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 60000);
+}
+async function saveLastOut() {
+  if (!lastOut) return;
+  const { blob, name, ext } = lastOut;
+  const file = new File([blob], name, { type: ext === 'mp4' ? 'video/mp4' : 'video/webm' });
+  if (IS_MOBILE && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }   // 使用者關閉分享選單
+  }
+  downloadBlob(blob, name);
+}
+async function runPlayback(record, saveHandle) {
   const i = vItem(); if (!i) return; const v = V(i);
   if (!v.plan) return;
   if (vBusy) { toast('目前有其他工作進行中'); return; }
@@ -873,7 +938,7 @@ async function runPlayback(record) {
   vStopAll(); vBusy = record ? 'render' : 'play';
   const c = $('#vCanvas'), ctx = c.getContext('2d'), pid = 'vRenderProg';
   let cancelled = false, raf = 0, audio = null, rec = null, els = [];
-  const job = { cancel: () => { cancelled = true; cancelAnimationFrame(raf); audio?.stop(); if (rec && rec.state !== 'inactive') rec.stop(); els.forEach((e) => e.pause()); vBusy = ''; } };
+  const job = { cancel: () => { cancelled = true; cancelAnimationFrame(raf); audio?.stop(); if (rec && rec.state !== 'inactive') rec.stop(); els.forEach((e) => { e.pause(); e.remove(); }); vBusy = ''; } };
   vRun = job;
   try {
     vProg(pid, 0, '載入實拍影片…');
@@ -887,21 +952,17 @@ async function runPlayback(record) {
     let out = ac.destination, mime = '';
     if (record) {
       const dest = ac.createMediaStreamDestination(); out = dest;
-      const types = ['video/mp4;codecs=avc1.42E01F,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
-      mime = types.find((x) => window.MediaRecorder && MediaRecorder.isTypeSupported(x));
+      mime = recMime();
       if (!mime || !c.captureStream) throw new Error('這個瀏覽器不支援在網頁中錄製影片，請改用電腦版 Chrome 或 Edge');
       const stream = new MediaStream([...c.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
       rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10e6, audioBitsPerSecond: 192e3 });
       const chunks = []; rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      rec.onstop = () => {
+      rec.onstop = async () => {
         if (cancelled && !rec._done) return;
         const blob = new Blob(chunks, { type: mime.split(';')[0] }), ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
-        const u = URL.createObjectURL(blob), name = `${(i.name).replace(/[\\/:*?"<>|]+/g, '').slice(0, 24)}_${STYLES[v.plan.style].name}_${today()}.${ext}`;
-        $('#vOut').innerHTML = `<video class="vout" controls playsinline src="${u}"></video>
-          <div class="btns"><a class="btn pri" href="${u}" download="${esc(name)}">下載影片（${ext.toUpperCase()}，${(blob.size / 1048576).toFixed(1)} MB）</a></div>
-          ${ext === 'webm' ? '<p class="hint warn">這個瀏覽器只能輸出 WebM，請改用電腦版 Chrome 或 Edge 輸出 MP4。</p>' : ''}`;
-        vProg(pid, 1, `✓ 輸出完成：${f1(R.total)} 秒、1080×1920、${ext.toUpperCase()}`);
+        const name = outName(i, v, ext);
         v.exportedAt = new Date().toISOString(); vSaveNow(); $('#vReport').textContent = reportText(i, v);
+        await deliver(blob, name, ext, saveHandle, R.total);
       };
       // H.264 編碼器第一次啟動要幾秒、期間的畫面會被丟掉：先用拋棄式錄影器暖機，正式錄製開始後再停在第一格約 1 秒
       const hold = (sec, label) => new Promise((res) => {
@@ -909,14 +970,17 @@ async function runPlayback(record) {
         const f = () => { if (cancelled) return res(); const e = (performance.now() - w0) / 1000; drawFrame(ctx, 0, R); vProg(pid, 0.05 * Math.min(1, e / sec), label); if (e >= sec) res(); else raf = requestAnimationFrame(f); };
         f();
       });
-      if (mime.startsWith('video/mp4') && !runPlayback.warm) {
+      R.holding = true; drawFrame(ctx, 0, R);   // 先把第一格畫好，錄影器一開始抓到的就不會是之前的預覽畫面
+      if (NEEDS_WARMUP && mime.startsWith('video/mp4') && !runPlayback.warm) {
         const w = new MediaRecorder(stream, { mimeType: mime }); w.ondataavailable = () => {}; w.start(250);
         await hold(4.5, '第一次錄影，編碼器暖機中（約 4 秒）…');
-        await new Promise((res) => { w.onstop = res; w.stop(); });
+        // 有些瀏覽器停止錄影器後不會觸發 onstop：最多等 1.5 秒就繼續
+        await Promise.race([new Promise((res) => { w.onstop = res; try { w.stop(); } catch { res(); } }), new Promise((res) => setTimeout(res, 1500))]);
         runPlayback.warm = true; if (cancelled) return;
       }
-      rec.start(250);
-      await hold(mime.startsWith('video/mp4') ? 1 : 0.3, '準備錄影中…');
+      drawFrame(ctx, 0, R); rec.start(250);
+      await hold(NEEDS_WARMUP && mime.startsWith('video/mp4') ? 1 : 0.3, '準備錄影中…');
+      R.holding = false;
       if (cancelled) return;
     }
     audio = synth(ac, R, out);
@@ -927,7 +991,7 @@ async function runPlayback(record) {
       if (cancelled) return;
       const t = ac.currentTime - audio.T0;
       if (t >= R.total) {
-        drawFrame(ctx, R.total - 0.001, R); els.forEach((e) => e.pause());
+        drawFrame(ctx, R.total - 0.001, R); els.forEach((e) => e.pause()); setTimeout(() => els.forEach((e) => e.remove()), 1000);
         document.removeEventListener('visibilitychange', warnHidden);
         if (rec) { rec._done = true; setTimeout(() => rec.state !== 'inactive' && rec.stop(), 300); vProg(pid, 0.99, '封裝影片中…'); } else vProg(pid, 1, '預覽結束');
         vRun = null; vBusy = ''; return;
@@ -1038,9 +1102,21 @@ Object.assign(ACT, {
     vDirty(v); vSaveNow(); $('#dlg').close(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y);
   },
   vBlurDel(b) { const i = vItem(); if (!i) return; const v = V(i); v.manualBlur.splice(+b.dataset.k, 1); vDirty(v); vSaveNow(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y); },
-  vPlay() { runPlayback(false); },
   vStop() { vStopAll(); vProg('vRenderProg', null); const i = vItem(); if (i) drawStill(i); },
-  vRender() { runPlayback(true); },
+  async vRender() {
+    const i = vItem(); if (!i || !V(i).plan) return;
+    try { actx().resume(); } catch { /* 之後再試 */ }
+    let handle = null;
+    const mime = recMime(), ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+    if (!IS_MOBILE && window.showSaveFilePicker && mime) {
+      try {
+        handle = await window.showSaveFilePicker({ suggestedName: outName(i, V(i), ext), types: [{ description: ext === 'mp4' ? 'MP4 影片' : 'WebM 影片', accept: { [ext === 'mp4' ? 'video/mp4' : 'video/webm']: [`.${ext}`] } }] });
+      } catch (e) { if (e.name === 'AbortError') return; handle = null; }   // 取消就不輸出
+    }
+    runPlayback(true, handle);
+  },
+  vSaveOut() { saveLastOut(); },
+  vPlay() { try { actx().resume(); } catch { /* 之後再試 */ } runPlayback(false); },
   vCopyReport(b) { copy($('#vReport')?.textContent || '', b); },
   vCopyTags(b) { const i = vItem(); if (i) copy((V(i).plan?.hashtags || []).join(' '), b); },
 });
