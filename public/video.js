@@ -382,6 +382,376 @@ const THERMAL_LUT = (() => {
   return x.getImageData(0, 0, 256, 1).data;
 })();
 
+/* ========== 追加的 22 種風格（全部自繪，不模仿真實節目、App 或品牌） ========== */
+const SERIF = '"Noto Serif TC","PMingLiU","Songti TC",serif';
+const MONO = `"Courier New",${VFONT}`;
+const HAND = `"Segoe Print","Comic Sans MS",${VFONT}`;
+const LAYERS = {};
+// 不會變動的背景圖層只畫一次
+function layer(key, draw) { if (!LAYERS[key]) { const c = document.createElement('canvas'); c.width = VW; c.height = VH; draw(c.getContext('2d')); LAYERS[key] = c; } return LAYERS[key]; }
+const pointNo = (S) => S.shots.slice(0, S.k + 1).filter((s) => s.role === 'point').length;
+const pointTotal = (S) => Math.max(1, S.shots.filter((s) => s.role === 'point').length);
+function corners(ctx, x, y, w, h, L) { [[x, y, 1, 1], [x + w, y, -1, 1], [x, y + h, 1, -1], [x + w, y + h, -1, -1]].forEach(([a, b, sx, sy]) => { ctx.beginPath(); ctx.moveTo(a, b + sy * L); ctx.lineTo(a, b); ctx.lineTo(a + sx * L, b); ctx.stroke(); }); }
+function leaf(ctx, x, y, s, a, col) { ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, s, s * 0.45, 0, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.15)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-s, 0); ctx.lineTo(s, 0); ctx.stroke(); ctx.restore(); }
+function tickerBar(ctx, S, y, bg, color) {
+  ctx.save(); ctx.fillStyle = bg; ctx.fillRect(0, y, VW, 70); ctx.beginPath(); ctx.rect(0, y, VW, 70); ctx.clip();
+  ctx.font = `700 36px ${VFONT}`; ctx.fillStyle = color; ctx.textBaseline = 'middle';
+  const tk = `　◆　${S.ticker || S.short}`, tw = ctx.measureText(tk).width || 1, off = (S.t * 160) % tw;
+  for (let x = -off; x < VW; x += tw) ctx.fillText(tk, x, y + 35);
+  ctx.restore(); box(S, '跑馬燈', 0, y, VW, 70);
+}
+// 共用字幕區：底色＋大字＋小字
+function capBlock(ctx, S, o = {}) {
+  const { y = 1460, h = 250, x = 0, w = VW, bg = '', radius = 0, cap = {}, sub = {} } = o, cx = o.cx ?? x + w / 2;
+  const p = ease(S.lt / 0.3);
+  if (bg) { ctx.save(); ctx.globalAlpha *= p; ctx.fillStyle = bg; rrect(ctx, x, y, w, h, radius); ctx.fill(); ctx.restore(); box(S, '字幕條', x, y, w, h); }
+  txt(ctx, S, '大字', S.caption, cx, y + h * (S.sub ? 0.37 : 0.5), { size: 78, weight: 900, color: '#fff', maxW: w - 90, lines: 1, scale: S.pop, alpha: p, ...cap });
+  txt(ctx, S, '小字', S.sub, cx, y + h * 0.77, { size: 42, weight: 700, color: '#fff', maxW: w - 90, lines: 1, alpha: p, ...sub });
+}
+const mkMusic = (bpm, minor, root, drums, bass, lead, bassWave, leadWave, amb = '') => ({ bpm, minor, root, drums, bass, lead, bassWave, leadWave, amb });
+
+Object.assign(STYLES, {
+  news: { name: '新聞快報', bg: '#0d1b2a', filter: 'contrast(1.08) saturate(1.05)', tint: ['#1d3557', 0.1, 'soft-light'], music: mkMusic(118, true, 57, '4floor', '8ths', 'beep', 'square', 'sine') },
+  cooking: { name: '料理節目', bg: '#fff4e6', filter: 'saturate(1.18) brightness(1.05) sepia(0.08)', tint: ['#ff9f43', 0.12, 'soft-light'], frame: [60, 170, 960, 1180], round: 36, music: mkMusic(104, false, 62, 'claps', 'roots', 'arp8', 'triangle', 'triangle') },
+  sports: { name: '體育轉播', bg: '#06240f', filter: 'saturate(1.25) contrast(1.1)', tint: ['#22c55e', 0.1, 'overlay'], music: mkMusic(132, false, 60, '4floor', 'bounce', 'arp16', 'square', 'square') },
+  scifi: { name: '科幻全息', bg: '#020b14', filter: 'contrast(1.12) saturate(0.9) brightness(0.95)', tint: ['#00e5ff', 0.18, 'soft-light'], music: mkMusic(110, true, 57, 'halftime', 'drone', 'pad', 'sawtooth', 'sawtooth', 'hum') },
+  retro: { name: '復古錄影帶', bg: '#000', filter: 'saturate(0.85) contrast(1.1) sepia(0.2)', tint: ['#ff9e7a', 0.12, 'soft-light'], music: mkMusic(96, false, 60, 'pop', 'roots', 'pad', 'sawtooth', 'sawtooth') },
+  pixel: { name: '像素遊戲', bg: '#1b1b3a', filter: 'saturate(1.3) contrast(1.1)', tint: ['#7b2cbf', 0.1, 'overlay'], frame: [90, 260, 900, 1100], music: mkMusic(140, false, 72, 'pop', 'bounce', 'arp16', 'square', 'square') },
+  comic: { name: '美式漫畫', bg: '#ffd60a', filter: 'saturate(1.35) contrast(1.2)', tint: ['#ff3b30', 0.1, 'overlay'], frame: [50, 120, 980, 1240], music: mkMusic(124, false, 62, 'pop', 'bounce', 'arp8', 'square', 'square') },
+  magazine: { name: '時尚雜誌', bg: '#f4efe9', filter: 'contrast(1.05) saturate(0.95) brightness(1.04)', tint: ['#f4efe9', 0.08, 'soft-light'], music: mkMusic(98, false, 64, 'claps', 'roots', 'pad', 'triangle', 'sine') },
+  minimal: { name: '極簡質感', bg: '#f7f7f5', filter: 'saturate(0.95) brightness(1.03)', tint: ['#ffffff', 0.06, 'soft-light'], frame: [90, 220, 900, 1180], round: 8, music: mkMusic(90, false, 65, '', 'drone', 'pad', 'sine', 'sine') },
+  unbox: { name: '開箱實驗室', bg: '#e9f1f7', filter: 'brightness(1.05) contrast(1.05)', tint: ['#a8dadc', 0.1, 'soft-light'], music: mkMusic(112, false, 60, 'pop', '8ths', 'beep', 'triangle', 'sine') },
+  detective: { name: '偵探辦案', bg: '#1a1410', filter: 'sepia(0.35) contrast(1.15) saturate(0.8)', tint: ['#7f5539', 0.2, 'soft-light'], music: mkMusic(88, true, 50, 'halftime', 'roots', 'pad', 'triangle', 'triangle') },
+  space: { name: '太空任務', bg: '#03030f', filter: 'contrast(1.1) saturate(1.1)', tint: ['#4361ee', 0.12, 'soft-light'], frame: [60, 220, 960, 1150], round: 40, music: mkMusic(120, true, 55, 'halftime', 'drone', 'arp8', 'sawtooth', 'sine', 'hum') },
+  cute: { name: '粉嫩可愛', bg: '#fff0f6', filter: 'saturate(1.1) brightness(1.08)', tint: ['#ffc2d9', 0.15, 'soft-light'], frame: [80, 220, 920, 1160], round: 60, music: mkMusic(120, false, 72, 'claps', 'bounce', 'arp8', 'triangle', 'sine') },
+  guochao: { name: '國潮紅金', bg: '#8b0000', filter: 'saturate(1.15) contrast(1.08)', tint: ['#ff4d4d', 0.1, 'soft-light'], frame: [70, 230, 940, 1150], music: mkMusic(100, false, 62, 'claps', 'roots', 'arp8', 'triangle', 'triangle') },
+  ocean: { name: '清新海洋', bg: '#d9f3ff', filter: 'saturate(1.08) brightness(1.06)', tint: ['#4cc9f0', 0.12, 'soft-light'], music: mkMusic(100, false, 64, 'pop', 'roots', 'pad', 'triangle', 'sine', 'rain') },
+  forest: { name: '綠意自然', bg: '#e8f0e0', filter: 'saturate(1.05) sepia(0.08)', tint: ['#95d5b2', 0.12, 'soft-light'], frame: [70, 190, 940, 1180], round: 30, music: mkMusic(92, false, 62, 'claps', 'roots', 'arp8', 'triangle', 'triangle', 'wind') },
+  polaroid: { name: '拍立得相簿', bg: '#efe6d8', filter: 'saturate(1.05) sepia(0.12) brightness(1.04)', tint: ['#f4a261', 0.1, 'soft-light'], frame: [130, 170, 820, 1080], music: mkMusic(100, false, 65, 'claps', 'roots', 'arp8', 'triangle', 'triangle') },
+  chat: { name: '聊天訊息', bg: '#eef1f6', filter: 'saturate(1.05) brightness(1.03)', tint: ['#7c9cff', 0.08, 'soft-light'], frame: [70, 250, 780, 1040], round: 36, music: mkMusic(108, false, 67, 'pop', 'roots', 'beep', 'triangle', 'sine') },
+  countdown: { name: '重點倒數', bg: '#0f0f0f', filter: 'contrast(1.12) saturate(1.15)', tint: ['#facc15', 0.1, 'overlay'], music: mkMusic(126, true, 57, '4floor', '16ths', 'arp16', 'sawtooth', 'square') },
+  museum: { name: '展品鑑賞', bg: '#121212', filter: 'contrast(1.08) brightness(1.02)', tint: ['#ffe8c2', 0.1, 'soft-light'], frame: [140, 260, 800, 1050], music: mkMusic(76, false, 60, '', 'drone', 'pad', 'sine', 'triangle') },
+  travel: { name: '旅行日誌', bg: '#f3e9d2', filter: 'saturate(1.1) sepia(0.1)', tint: ['#e9c46a', 0.1, 'soft-light'], frame: [70, 180, 940, 1160], round: 18, music: mkMusic(108, false, 64, 'pop', 'roots', 'arp8', 'triangle', 'triangle', 'wind') },
+  stage: { name: '舞台聚光', bg: '#14000a', filter: 'contrast(1.12) saturate(1.1)', tint: ['#ffb703', 0.12, 'soft-light'], frame: [170, 260, 740, 1000], round: 20, music: mkMusic(118, false, 60, 'claps', 'roots', 'arp8', 'square', 'triangle') },
+});
+Object.assign(STYLE_TRANS, {
+  news: ['flash', 'wipe', 'whip', 'flash'], cooking: ['circle', 'whip', 'wipe', 'circle'], sports: ['whip', 'zoom', 'whip', 'flash'], scifi: ['glitch', 'zoom', 'glitch', 'circle'],
+  retro: ['glitch', 'fade', 'glitch', 'flash'], pixel: ['circle', 'whip', 'flash', 'circle'], comic: ['zoom', 'whip', 'circle', 'flash'], magazine: ['fade', 'wipe', 'fade', 'fade'],
+  minimal: ['fade', 'fade', 'wipe', 'fade'], unbox: ['zoom', 'wipe', 'whip', 'circle'], detective: ['fade', 'wipe', 'zoom', 'flash'], space: ['zoom', 'circle', 'whip', 'flash'],
+  cute: ['heart', 'circle', 'zoom', 'heart'], guochao: ['wipe', 'whip', 'circle', 'flash'], ocean: ['wipe', 'fade', 'circle', 'wipe'], forest: ['fade', 'wipe', 'circle', 'fade'],
+  polaroid: ['whip', 'wipe', 'whip', 'circle'], chat: ['whip', 'wipe', 'whip', 'zoom'], countdown: ['flash', 'zoom', 'whip', 'flash'], museum: ['fade', 'fade', 'zoom', 'fade'],
+  travel: ['whip', 'wipe', 'zoom', 'circle'], stage: ['circle', 'flash', 'zoom', 'flash'],
+});
+// 底層背景（畫在實拍畫面之下）
+STYLES.comic.under = (ctx) => ctx.drawImage(layer('comic', (c) => { c.fillStyle = 'rgba(230,57,70,0.35)'; for (let y = 0; y < VH; y += 36) for (let x = ((y / 36) % 2) * 18; x < VW; x += 36) { c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2); c.fill(); } }), 0, 0);
+STYLES.space.under = (ctx) => ctx.drawImage(layer('space', (c) => { const r = rng(11); for (let q = 0; q < 260; q++) { c.fillStyle = `rgba(255,255,255,${0.3 + r() * 0.7})`; c.beginPath(); c.arc(r() * VW, r() * VH, r() * 2.6 + 0.4, 0, Math.PI * 2); c.fill(); } }), 0, 0);
+STYLES.polaroid.under = (ctx) => ctx.drawImage(layer('polaroid', (c) => {
+  const r = rng(21); c.fillStyle = 'rgba(120,90,50,0.12)'; for (let q = 0; q < 900; q++) c.fillRect(r() * VW, r() * VH, 2 + r() * 4, 2 + r() * 4);
+  c.save(); c.shadowColor = 'rgba(60,40,20,0.35)'; c.shadowBlur = 30; c.shadowOffsetY = 12; c.fillStyle = '#fffdf8'; c.fillRect(100, 140, 880, 1500); c.restore();
+}), 0, 0);
+STYLES.museum.under = (ctx) => ctx.drawImage(layer('museum', (c) => { const g = c.createRadialGradient(540, 700, 80, 540, 800, 900); g.addColorStop(0, 'rgba(255,236,200,0.35)'); g.addColorStop(1, 'rgba(255,236,200,0)'); c.fillStyle = g; c.fillRect(0, 0, VW, VH); }), 0, 0);
+STYLES.stage.under = (ctx) => ctx.drawImage(layer('stage', (c) => {
+  [[0, 1], [VW, -1]].forEach(([x0, dir]) => { for (let q = 0; q < 6; q++) { const x = x0 + dir * q * 26, l = Math.min(x, x + dir * 26); const g = c.createLinearGradient(l, 0, l + 26, 0); g.addColorStop(0, '#5c0011'); g.addColorStop(0.5, '#c1121f'); g.addColorStop(1, '#5c0011'); c.fillStyle = g; c.fillRect(l, 0, 26, VH); } });
+  c.fillStyle = '#7a0019'; c.fillRect(0, 0, VW, 80); for (let x = 0; x < VW; x += 90) { c.beginPath(); c.arc(x + 45, 80, 45, 0, Math.PI); c.fill(); }
+  const g = c.createRadialGradient(540, 700, 60, 540, 760, 820); g.addColorStop(0, 'rgba(255,230,170,0.3)'); g.addColorStop(1, 'rgba(255,230,170,0)'); c.fillStyle = g; c.fillRect(0, 0, VW, VH);
+}), 0, 0);
+
+Object.assign(STYLE_DRAW, {
+  news(ctx, S) {
+    const { t, lt } = S;
+    ctx.save(); ctx.fillStyle = '#d62828'; ctx.fillRect(40, 70, 170, 76); ctx.fillStyle = 'rgba(10,20,40,0.82)'; ctx.fillRect(210, 70, 330, 76); ctx.restore();
+    box(S, '台標', 40, 70, 500, 76);
+    txt(ctx, S, '台標文字', Math.floor(t * 2) % 2 ? '快報' : 'LIVE', 125, 108, { size: 40, weight: 900, lines: 1, maxW: 150 });
+    txt(ctx, S, '台標文字', '好物新聞台', 375, 108, { size: 38, weight: 800, lines: 1, maxW: 300 });
+    const sl = ease(lt / 0.3);
+    ctx.save(); ctx.translate((1 - sl) * -1100, 0);
+    ctx.fillStyle = '#d62828'; ctx.fillRect(40, 1390, 280, 66); ctx.fillStyle = '#fff'; ctx.fillRect(40, 1456, 1000, 150); ctx.fillStyle = '#102a43'; ctx.fillRect(40, 1606, 1000, 84);
+    ctx.restore();
+    box(S, '字幕條', 40, 1390, 1000, 300);
+    txt(ctx, S, '標籤', '即時好物快報', 180, 1423, { size: 34, weight: 900, lines: 1, maxW: 250, alpha: sl });
+    txt(ctx, S, '大字', S.caption, 540, 1531, { size: 76, weight: 900, color: '#0d1b2a', maxW: 930, lines: 1, scale: S.pop, alpha: sl });
+    txt(ctx, S, '小字', S.sub, 540, 1648, { size: 40, weight: 700, color: '#fff', maxW: 930, lines: 1, alpha: sl });
+    tickerBar(ctx, S, 1720, '#d62828', '#fff');
+  },
+  cooking(ctx, S) {
+    const { t, lt, shot } = S;
+    ctx.save(); ctx.fillStyle = '#fff'; ctx.strokeStyle = '#e8590c'; ctx.lineWidth = 5;
+    [[-26, 0], [0, -14], [26, 0]].forEach(([dx, dy]) => { ctx.beginPath(); ctx.arc(110 + dx, 96 + dy, 26, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); });
+    ctx.fillRect(84, 100, 52, 34); ctx.strokeRect(84, 100, 52, 34); ctx.restore();
+    txt(ctx, S, '介面', '今日好物廚房', 170, 108, { size: 46, weight: 900, color: '#c2410c', align: 'left', lines: 1 });
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+    for (let q = 0; q < 3; q++) { const x = 820 + q * 70, ph = (t * 0.6 + q * 0.33) % 1; ctx.globalAlpha = Math.sin(ph * Math.PI) * 0.8; ctx.beginPath(); for (let y = 0; y <= 120; y += 10) { const yy = 330 - ph * 80 - y, xx = x + Math.sin((y + t * 120) / 22) * 12; if (y) ctx.lineTo(xx, yy); else ctx.moveTo(xx, yy); } ctx.stroke(); }
+    ctx.restore();
+    const p = ease(lt / 0.3);
+    ctx.save(); ctx.globalAlpha = p; ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(160,80,20,0.25)'; ctx.shadowBlur = 24; rrect(ctx, 60, 1400, 960, 330, 30); ctx.fill(); ctx.shadowBlur = 0;
+    ctx.setLineDash([16, 12]); ctx.strokeStyle = '#ff9f43'; ctx.lineWidth = 5; rrect(ctx, 80, 1420, 920, 290, 22); ctx.stroke(); ctx.restore();
+    box(S, '紙卡', 60, 1400, 960, 330);
+    const tag = shot.role === 'hook' ? '今天的煩惱' : shot.role === 'intro' ? '主角登場' : shot.role === 'cta' ? '完成上桌' : `STEP ${pointNo(S)}`;
+    txt(ctx, S, '標籤', tag, 540, 1462, { size: 34, weight: 900, color: '#fff', bg: '#ff7a1a', padX: 22, padY: 6, radius: 30, lines: 1, alpha: p });
+    txt(ctx, S, '大字', S.caption, 540, 1562, { size: 74, weight: 900, color: '#7c2d12', maxW: 860, lines: 1, scale: S.pop, alpha: p });
+    txt(ctx, S, '小字', S.sub, 540, 1662, { size: 40, weight: 700, color: '#9a3412', maxW: 860, lines: 1, alpha: p });
+  },
+  sports(ctx, S) {
+    const { lt, shot } = S;
+    const got = S.shots.slice(0, S.k).filter((s) => s.role === 'point' || s.role === 'cta').length + ((shot.role === 'point' || shot.role === 'cta') && lt > 0.5 ? 1 : 0);
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.78)'; rrect(ctx, 40, 70, 600, 96, 14); ctx.fill(); ctx.fillStyle = '#16a34a'; ctx.fillRect(40, 70, 14, 96); ctx.restore();
+    box(S, '記分板', 40, 70, 600, 96);
+    txt(ctx, S, '標籤', '生活困擾', 170, 118, { size: 34, weight: 900, lines: 1, maxW: 200 });
+    txt(ctx, S, '標籤', `0 : ${got}`, 340, 118, { size: 50, weight: 900, color: '#facc15', lines: 1, maxW: 140 });
+    txt(ctx, S, '標籤', S.short.slice(0, 5), 520, 118, { size: 34, weight: 900, lines: 1, maxW: 200 });
+    txt(ctx, S, '介面', Math.floor(S.t * 2) % 2 ? '● LIVE' : '○ LIVE', 1030, 118, { size: 36, weight: 900, color: '#ef4444', align: 'right', lines: 1 });
+    const call = { hook: '開賽！', intro: '上場！', point: '得分！', cta: '勝利！' }[shot.role] || '';
+    const pp = springy((lt - 0.05) / 0.45), fd = 1 - ease((lt - 1.1) / 0.3);
+    if (pp > 0 && fd > 0) txt(ctx, S, '對戰標語', call, 540, 720, { size: 140, weight: 900, color: '#fff', stroke: '#15803d', strokeW: 18, scale: 0.4 + 0.6 * pp, alpha: fd, lines: 1 });
+    capBlock(ctx, S, { y: 1440, h: 260, bg: 'rgba(20,83,45,0.92)', sub: { color: '#facc15' } });
+    ctx.save(); ctx.fillStyle = '#fff'; ctx.fillRect(0, 1440, VW, 8); ctx.restore();
+  },
+  scifi(ctx, S) {
+    const { t, lt, shot } = S;
+    ctx.save(); ctx.strokeStyle = '#5ef2ff'; ctx.lineWidth = 5; ctx.shadowColor = '#5ef2ff'; ctx.shadowBlur = 16;
+    corners(ctx, 50, 50, 980, 1820, 80);
+    const sy = 220 + ((t * 420) % 1100); ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.moveTo(60, sy); ctx.lineTo(1020, sy); ctx.stroke();
+    ctx.globalAlpha = 0.9; ctx.lineWidth = 3; ctx.translate(540, 760); ctx.rotate(t * 0.8);
+    for (let q = 0; q < 4; q++) { ctx.rotate(Math.PI / 2); ctx.beginPath(); ctx.arc(0, 0, 170, 0.15, Math.PI / 2 - 0.15); ctx.stroke(); }
+    ctx.restore();
+    txt(ctx, S, '介面', 'HOLO SCAN', 110, 120, { size: 36, weight: 800, color: '#5ef2ff', align: 'left', lines: 1, font: MONO });
+    txt(ctx, S, '介面', shot.role === 'hook' ? '搜尋中…' : shot.role === 'cta' ? '任務達成' : '目標鎖定', 970, 120, { size: 36, weight: 800, color: Math.floor(t * 3) % 2 ? '#5ef2ff' : '#b8fbff', align: 'right', lines: 1 });
+    const prog = (S.k + Math.min(1, lt / S.d)) / S.n;
+    ctx.save(); ctx.strokeStyle = '#5ef2ff'; ctx.lineWidth = 3; ctx.strokeRect(110, 170, 860, 18); ctx.fillStyle = 'rgba(94,242,255,0.7)'; ctx.fillRect(112, 172, 856 * prog, 14); ctx.restore();
+    box(S, '進度條', 110, 170, 860, 18);
+    txt(ctx, S, '大字', S.caption, 540, 1460, { size: 86, weight: 900, color: '#e6fdff', glow: '#00e5ff', glowBlur: 34, maxW: 920, lines: 1, scale: S.pop, alpha: ease(lt / 0.3) });
+    txt(ctx, S, '小字', S.sub, 540, 1600, { size: 44, weight: 700, color: '#bdf6ff', bg: 'rgba(0,30,45,0.6)', maxW: 900, lines: 1, alpha: ease((lt - 0.15) / 0.3) });
+  },
+  retro(ctx, S) {
+    const { t, lt } = S;
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.18)'; for (let y = 0; y < VH; y += 6) ctx.fillRect(0, y, VW, 2);
+    const by = (t * 260) % 2200 - 140, g = ctx.createLinearGradient(0, by, 0, by + 120); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.12)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(0, by, VW, 120);
+    ctx.restore();
+    if (Math.floor(t * 1.5) % 2 === 0) txt(ctx, S, '介面', '▶ PLAY', 80, 120, { size: 54, weight: 900, color: '#fff', align: 'left', lines: 1, font: MONO, glow: 'rgba(255,255,255,0.6)', glowBlur: 8 });
+    txt(ctx, S, '介面', 'SP', 1000, 120, { size: 54, weight: 900, color: '#fff', align: 'right', lines: 1, font: MONO });
+    const a = ease(lt / 0.25), jx = Math.sin(t * 40) * 2, o = { size: 88, weight: 900, maxW: 940, lines: 1, scale: S.pop, font: MONO };
+    txt(ctx, S, '大字', S.caption, 535 + jx, 1480, { ...o, color: '#ff2a6d', alpha: a * 0.8 });
+    txt(ctx, S, '大字', S.caption, 545 + jx, 1480, { ...o, color: '#05d9e8', alpha: a * 0.8 });
+    txt(ctx, S, '大字', S.caption, 540 + jx, 1480, { ...o, color: '#fff7d6', alpha: a });
+    txt(ctx, S, '小字', S.sub, 540, 1620, { size: 46, weight: 800, color: '#ffe066', bg: 'rgba(0,0,0,0.55)', maxW: 900, lines: 1, alpha: a, font: MONO });
+  },
+  pixel(ctx, S) {
+    const { t, lt, shot } = S, [fx, fy, fw, fh] = STYLES.pixel.frame;
+    ctx.save(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 14; ctx.strokeRect(fx - 7, fy - 7, fw + 14, fh + 14); ctx.strokeStyle = '#000'; ctx.lineWidth = 8; ctx.strokeRect(fx - 18, fy - 18, fw + 36, fh + 36);
+    ctx.fillStyle = '#1b1b3a'; [[fx - 22, fy - 22], [fx + fw + 8, fy - 22], [fx - 22, fy + fh + 8], [fx + fw + 8, fy + fh + 8]].forEach(([x, y]) => ctx.fillRect(x, y, 14, 14)); ctx.restore();
+    txt(ctx, S, '介面', '1P', 100, 140, { size: 52, weight: 900, color: '#ffd60a', align: 'left', lines: 1, font: MONO });
+    for (let q = 0; q < 3; q++) drawHeart(ctx, 210 + q * 66, 146, 56, '#ff4d6d');
+    txt(ctx, S, '介面', `★×${String(pointNo(S)).padStart(2, '0')}`, 990, 140, { size: 52, weight: 900, color: '#ffd60a', align: 'right', lines: 1, font: MONO });
+    if (shot.role === 'point' && lt > 0.3 && lt < 1.3) txt(ctx, S, '爆炸貼紙', '+1 UP', 800, 520 - (lt - 0.3) * 120, { size: 60, weight: 900, color: '#7CFC00', stroke: '#000', strokeW: 8, lines: 1, font: MONO, alpha: 1 - ease((lt - 1) / 0.3) });
+    const p = ease(lt / 0.25);
+    ctx.save(); ctx.globalAlpha = p; ctx.fillStyle = '#000'; ctx.fillRect(60, 1420, 960, 300); ctx.strokeStyle = '#fff'; ctx.lineWidth = 8; ctx.strokeRect(74, 1434, 932, 272); ctx.restore();
+    box(S, '字幕條', 60, 1420, 960, 300);
+    const chars = [...(S.caption || '')], n = Math.floor(lt / 0.05);
+    txt(ctx, S, '大字', chars.slice(0, n).join(''), 110, 1520, { size: 70, weight: 900, color: '#fff', align: 'left', maxW: 860, lines: 1, font: MONO });
+    txt(ctx, S, '小字', S.sub, 110, 1630, { size: 40, weight: 700, color: '#9be7ff', align: 'left', maxW: 860, lines: 1, font: MONO, alpha: n > chars.length ? 1 : 0 });
+    if (Math.floor(t * 3) % 2) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(950, 1672); ctx.lineTo(980, 1672); ctx.lineTo(965, 1692); ctx.fill(); }
+  },
+  comic(ctx, S) {
+    const { lt, shot, k } = S, [fx, fy, fw, fh] = STYLES.comic.frame;
+    ctx.save(); ctx.strokeStyle = '#111'; ctx.lineWidth = 14; ctx.strokeRect(fx, fy, fw, fh); ctx.restore();
+    txt(ctx, S, '介面', shot.role === 'hook' ? '某天……' : shot.role === 'cta' ? '下一格，換你！' : `第 ${k + 1} 格`, fx + 24, fy + 52, { size: 40, weight: 900, color: '#111', bg: '#fff59d', padX: 18, padY: 8, radius: 0, align: 'left', lines: 1 });
+    if (shot.role !== 'hook') {
+      const p = springy((lt - 0.2) / 0.5);
+      if (p > 0) { drawStar(ctx, 840, 420, 150 * p, 14, '#ff3b30', 0.2); drawStar(ctx, 840, 420, 120 * p, 14, '#ffd60a', 0.4); txt(ctx, S, '爆炸貼紙', ['POW!', 'WOW!', 'BAM!', 'YES!'][k % 4], 840, 420, { size: 70 * Math.max(0.01, p), weight: 900, color: '#111', lines: 1, rot: -0.15, font: `Impact,${VFONT}` }); }
+    }
+    const p = ease(lt / 0.25);
+    ctx.save(); ctx.globalAlpha = p; ctx.fillStyle = '#fff'; ctx.strokeStyle = '#111'; ctx.lineWidth = 8;
+    const ell = () => { ctx.beginPath(); ctx.ellipse(540, 1560, 500, 150, 0, 0, Math.PI * 2); }, tail = () => { ctx.beginPath(); ctx.moveTo(300, 1440); ctx.lineTo(240, 1340); ctx.lineTo(390, 1430); ctx.closePath(); };
+    ell(); ctx.stroke(); tail(); ctx.stroke(); ell(); ctx.fill(); tail(); ctx.fill(); ctx.restore();
+    box(S, '紙卡', 40, 1410, 1000, 300);
+    txt(ctx, S, '大字', S.caption, 540, 1530, { size: 76, weight: 900, color: '#111', maxW: 820, lines: 1, scale: S.pop, alpha: p });
+    txt(ctx, S, '小字', S.sub, 540, 1625, { size: 40, weight: 800, color: '#c1121f', maxW: 760, lines: 1, alpha: p });
+  },
+  magazine(ctx, S) {
+    const { lt, k } = S;
+    let g = ctx.createLinearGradient(0, 1150, 0, VH); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.6)'); ctx.fillStyle = g; ctx.fillRect(0, 1150, VW, 770);
+    g = ctx.createLinearGradient(0, 0, 0, 420); g.addColorStop(0, 'rgba(0,0,0,0.4)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, VW, 420);
+    txt(ctx, S, '介面', '好物誌', 540, 190, { size: 170, weight: 900, color: '#fff', lines: 1, font: SERIF, glow: 'rgba(0,0,0,0.35)', glowBlur: 20 });
+    txt(ctx, S, '介面', `ISSUE ${String(k + 1).padStart(2, '0')}　|　本期封面特輯`, 540, 330, { size: 34, weight: 700, color: '#fff', lines: 1 });
+    const a = ease(lt / 0.4);
+    ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = '#fff'; ctx.fillRect(80, 1430, 120 * a, 6); ctx.restore();
+    txt(ctx, S, '大字', S.caption, 80, 1530, { size: 84, weight: 900, color: '#fff', align: 'left', maxW: 920, lines: 1, font: SERIF, alpha: a, scale: S.pop });
+    txt(ctx, S, '小字', S.sub, 80, 1640, { size: 42, weight: 600, color: '#f1e4d3', align: 'left', maxW: 900, lines: 1, alpha: a });
+  },
+  minimal(ctx, S) {
+    const { lt, k, n } = S, a = ease(lt / 0.5);
+    txt(ctx, S, '介面', `${String(k + 1).padStart(2, '0')} / ${String(n).padStart(2, '0')}`, 90, 140, { size: 34, weight: 500, color: '#555', align: 'left', lines: 1 });
+    txt(ctx, S, '介面', S.short, 990, 140, { size: 34, weight: 500, color: '#555', align: 'right', lines: 1, maxW: 500 });
+    ctx.save(); ctx.fillStyle = '#222'; ctx.fillRect(90, 1490, 60 * a, 3); ctx.restore();
+    txt(ctx, S, '大字', S.caption, 90, 1570, { size: 66, weight: 700, color: '#1a1a1a', align: 'left', maxW: 900, lines: 1, alpha: a });
+    txt(ctx, S, '小字', S.sub, 90, 1660, { size: 38, weight: 400, color: '#666', align: 'left', maxW: 900, lines: 1, alpha: ease((lt - 0.2) / 0.5) });
+  },
+  unbox(ctx, S) {
+    const { lt, shot } = S;
+    ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.92)'; rrect(ctx, 40, 60, 1000, 110, 24); ctx.fill();
+    ctx.strokeStyle = '#0f4c81'; ctx.lineWidth = 6; ctx.fillStyle = '#7ed6c4'; ctx.beginPath(); ctx.moveTo(92, 82); ctx.lineTo(92, 106); ctx.lineTo(72, 146); ctx.lineTo(128, 146); ctx.lineTo(108, 106); ctx.lineTo(108, 82); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    box(S, '台標', 40, 60, 1000, 110);
+    txt(ctx, S, '台標文字', '好物開箱實驗室', 150, 115, { size: 44, weight: 900, color: '#0f4c81', align: 'left', lines: 1 });
+    txt(ctx, S, '台標文字', `檢查 ${Math.min(pointTotal(S), pointNo(S))}/${pointTotal(S)}`, 1010, 115, { size: 38, weight: 800, color: '#2a9d8f', align: 'right', lines: 1 });
+    if (shot.role === 'point' || shot.role === 'cta') {
+      const p = springy((lt - 0.3) / 0.5);
+      if (p > 0) { const s = Math.max(0, Math.min(1.1, p)); ctx.save(); ctx.translate(900, 380); ctx.scale(s, s); ctx.fillStyle = '#2a9d8f'; ctx.beginPath(); ctx.arc(0, 0, 90, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 18; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(-40, 0); ctx.lineTo(-10, 32); ctx.lineTo(44, -30); ctx.stroke(); ctx.restore(); }
+    }
+    capBlock(ctx, S, { y: 1430, h: 260, x: 40, w: 1000, bg: 'rgba(255,255,255,0.94)', radius: 28, cap: { color: '#0f4c81' }, sub: { color: '#2a9d8f' } });
+  },
+  detective(ctx, S) {
+    const { t, lt, shot } = S;
+    const g = ctx.createRadialGradient(540, 900, 300, 540, 900, 1150); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.75)'); ctx.fillStyle = g; ctx.fillRect(0, 0, VW, VH);
+    const mx = 540 + Math.sin(t * 0.9) * 180, my = 780 + Math.cos(t * 0.7) * 140;
+    ctx.save(); ctx.strokeStyle = '#d4a373'; ctx.lineWidth = 16; ctx.beginPath(); ctx.arc(mx, my, 120, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 26; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(mx + 90, my + 90); ctx.lineTo(mx + 190, my + 190); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,240,200,0.1)'; ctx.beginPath(); ctx.arc(mx, my, 112, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    ctx.save(); ctx.fillStyle = '#e9d8a6'; ctx.fillRect(40, 70, 460, 90); ctx.restore(); box(S, '台標', 40, 70, 460, 90);
+    txt(ctx, S, '台標文字', `CASE ${String(S.k + 1).padStart(2, '0')}　案件檔案`, 270, 115, { size: 38, weight: 900, color: '#3d2b1f', lines: 1, maxW: 420, font: MONO });
+    ctx.save(); ctx.fillStyle = 'rgba(233,216,166,0.95)'; ctx.fillRect(60, 1420, 960, 290); ctx.restore(); box(S, '紙卡', 60, 1420, 960, 290);
+    const chars = [...(S.caption || '')], n = Math.floor(lt / 0.06);
+    txt(ctx, S, '大字', chars.slice(0, n).join(''), 100, 1520, { size: 70, weight: 900, color: '#3d2b1f', align: 'left', maxW: 880, lines: 1, font: MONO });
+    txt(ctx, S, '小字', S.sub, 100, 1630, { size: 40, weight: 700, color: '#6b4f3a', align: 'left', maxW: 880, lines: 1, alpha: ease((lt - 0.6) / 0.3) });
+    if (shot.role === 'cta') {
+      const p = springy((lt - 0.4) / 0.5);
+      if (p > 0) { const s = 1.6 - 0.6 * Math.min(1, p); ctx.save(); ctx.globalAlpha = Math.min(1, p) * 0.9; ctx.translate(820, 430); ctx.rotate(-0.2); ctx.scale(s, s); ctx.strokeStyle = '#c1121f'; ctx.lineWidth = 10; ctx.strokeRect(-140, -70, 280, 140); ctx.fillStyle = '#c1121f'; ctx.font = `900 96px ${VFONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('結案', 0, 4); ctx.restore(); }
+    }
+  },
+  space(ctx, S) {
+    const { t, lt, shot } = S;
+    txt(ctx, S, '介面', '🚀 好物太空任務', 90, 130, { size: 42, weight: 900, color: '#e0e7ff', align: 'left', lines: 1 });
+    txt(ctx, S, '介面', `MISSION ${S.k + 1}/${S.n}`, 990, 130, { size: 36, weight: 800, color: '#a5b4fc', align: 'right', lines: 1, font: MONO });
+    if (shot.role !== 'point') {
+      const seg = S.d / 3, hook = shot.role === 'hook';
+      const word = hook ? String(3 - Math.min(2, Math.floor(lt / seg))) : shot.role === 'intro' ? '發射！' : '任務完成';
+      const local = hook ? (lt % seg) / seg : lt, p = springy((hook ? local * seg : lt) / 0.4), fd = hook ? 1 - ease((local - 0.7) / 0.3) : 1 - ease((lt - 1.2) / 0.3);
+      if (p > 0 && fd > 0) txt(ctx, S, '對戰標語', word, 540, 760, { size: hook ? 260 : 130, weight: 900, color: '#fff', glow: '#818cf8', glowBlur: 40, scale: 0.5 + 0.5 * p, alpha: fd, lines: 1 });
+    }
+    ctx.save(); ctx.strokeStyle = 'rgba(165,180,252,0.5)'; ctx.lineWidth = 3; ctx.setLineDash([10, 14]); ctx.beginPath(); ctx.ellipse(540, 1450, 500, 60, 0, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    const ang = t * 1.4; ctx.fillStyle = '#fbbf24'; ctx.beginPath(); ctx.arc(540 + Math.cos(ang) * 500, 1450 + Math.sin(ang) * 60, 12, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    txt(ctx, S, '大字', S.caption, 540, 1550, { size: 80, weight: 900, color: '#fff', glow: '#6366f1', glowBlur: 30, maxW: 940, lines: 1, scale: S.pop, alpha: ease(lt / 0.3) });
+    txt(ctx, S, '小字', S.sub, 540, 1670, { size: 42, weight: 700, color: '#c7d2fe', maxW: 920, lines: 1, alpha: ease((lt - 0.15) / 0.3) });
+  },
+  cute(ctx, S) {
+    const { t, lt } = S;
+    for (let q = 0; q < 9; q++) { const r = rng(q * 13 + 5), x = r() * 1000 + 40, y = r() * 1800 + 60, s = 18 + r() * 26; ctx.save(); ctx.globalAlpha = 0.5 + 0.5 * Math.sin(t * 3 + q * 1.7); drawStar(ctx, x, y, s, 4, q % 2 ? '#ffd6e7' : '#fff59d', t * 0.5); ctx.restore(); }
+    txt(ctx, S, '介面', '♡ 今日小確幸 ♡', 540, 130, { size: 48, weight: 900, color: '#ff5c8a', lines: 1 });
+    const p = Math.max(0, Math.min(1.1, springy(lt / 0.5))), sc = 0.7 + 0.3 * p;
+    ctx.save(); ctx.translate(540, 1570); ctx.scale(sc, sc); ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(255,92,138,0.25)'; ctx.shadowBlur = 30;
+    [[-330, 10, 120], [-150, -60, 140], [60, -70, 150], [270, -10, 130], [-240, 80, 110], [200, 80, 120], [0, 70, 150]].forEach(([x, y, r]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); });
+    ctx.restore(); box(S, '紙卡', 80, 1420, 920, 330);
+    drawHeart(ctx, 150, 1450, 50, '#ff8fab'); drawHeart(ctx, 930, 1700, 40, '#ffb3c6');
+    txt(ctx, S, '大字', S.caption, 540, 1530, { size: 72, weight: 900, color: '#ff4f81', maxW: 760, lines: 1, scale: S.pop });
+    txt(ctx, S, '小字', S.sub, 540, 1635, { size: 40, weight: 700, color: '#a2678a', maxW: 740, lines: 1 });
+  },
+  guochao(ctx, S) {
+    const { lt, shot } = S, [fx, fy, fw, fh] = STYLES.guochao.frame;
+    ctx.save(); ctx.strokeStyle = '#f5c542'; ctx.lineWidth = 8; ctx.strokeRect(fx - 16, fy - 16, fw + 32, fh + 32); ctx.lineWidth = 3; ctx.strokeRect(fx - 30, fy - 30, fw + 60, fh + 60);
+    [[fx - 30, fy - 30], [fx + fw - 16, fy - 30], [fx - 30, fy + fh - 16], [fx + fw - 16, fy + fh - 16]].forEach(([x, y]) => { ctx.fillStyle = '#f5c542'; ctx.fillRect(x, y, 46, 46); ctx.fillStyle = '#8b0000'; ctx.fillRect(x + 12, y + 12, 22, 22); ctx.fillStyle = '#f5c542'; ctx.fillRect(x + 19, y + 19, 8, 8); });
+    ctx.restore();
+    txt(ctx, S, '介面', '好 物 上 新', 540, 140, { size: 60, weight: 900, color: '#f5c542', lines: 1, font: SERIF });
+    if (shot.role === 'point' || shot.role === 'cta') { const p = springy((lt - 0.3) / 0.5); if (p > 0) txt(ctx, S, '印章', '好物', 900, 340, { size: 54, weight: 900, color: '#fff', bg: '#c1121f', padX: 18, padY: 14, radius: 8, rot: -0.12, scale: 1.6 - 0.6 * Math.min(1, p), alpha: Math.min(1, p), lines: 1, font: SERIF }); }
+    const a = ease(lt / 0.35);
+    txt(ctx, S, '大字', S.caption, 540, 1530, { size: 84, weight: 900, color: '#ffe9a8', stroke: '#5c0000', strokeW: 10, maxW: 940, lines: 1, font: SERIF, scale: S.pop, alpha: a });
+    txt(ctx, S, '小字', S.sub, 540, 1650, { size: 42, weight: 700, color: '#ffd166', maxW: 920, lines: 1, alpha: a });
+  },
+  ocean(ctx, S) {
+    const { t } = S;
+    for (let q = 0; q < 14; q++) { const r = rng(q * 7 + 3), x = r() * VW, sp = 120 + r() * 160, y = 1900 - ((t * sp + r() * 1900) % 1900), rr = 8 + r() * 22; ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x + Math.sin(t * 2 + q) * 12, y, rr, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+    const wave = (y0, amp, sp, col) => { ctx.beginPath(); ctx.moveTo(0, VH); for (let x = 0; x <= VW; x += 20) ctx.lineTo(x, y0 + Math.sin(x / 140 + t * sp) * amp); ctx.lineTo(VW, VH); ctx.closePath(); ctx.fillStyle = col; ctx.fill(); };
+    wave(1390, 22, 1.6, 'rgba(76,201,240,0.75)'); wave(1420, 18, -1.2, 'rgba(14,116,184,0.92)');
+    box(S, '字幕條', 0, 1400, VW, 380);
+    txt(ctx, S, '介面', '〜 清爽好物 〜', 540, 130, { size: 44, weight: 900, color: '#fff', bg: 'rgba(14,116,184,0.6)', radius: 40, lines: 1 });
+    txt(ctx, S, '大字', S.caption, 540, 1545, { size: 80, weight: 900, color: '#fff', maxW: 940, lines: 1, scale: S.pop, alpha: ease(S.lt / 0.3) });
+    txt(ctx, S, '小字', S.sub, 540, 1665, { size: 42, weight: 700, color: '#d0f4ff', maxW: 920, lines: 1, alpha: ease(S.lt / 0.3) });
+  },
+  forest(ctx, S) {
+    const { t, lt } = S;
+    for (let q = 0; q < 10; q++) { const r = rng(q * 31 + 9), x = r() * VW + Math.sin(t * 0.8 + q) * 60, y = ((t * (90 + r() * 80) + r() * 1920) % 2000) - 60; leaf(ctx, x, y, 22 + r() * 16, t * (0.8 + r()) + q, q % 3 ? '#74a957' : '#b5c99a'); }
+    txt(ctx, S, '介面', '🌿 自然好生活', 540, 120, { size: 46, weight: 900, color: '#3a5a40', lines: 1 });
+    const p = ease(lt / 0.35);
+    ctx.save(); ctx.globalAlpha = p; ctx.fillStyle = '#8b5e34'; rrect(ctx, 60, 1420, 960, 300, 26); ctx.fill(); ctx.strokeStyle = 'rgba(60,35,15,0.35)'; ctx.lineWidth = 3;
+    for (let y = 1452; y < 1700; y += 34) { ctx.beginPath(); ctx.moveTo(90, y); ctx.bezierCurveTo(400, y + 8, 700, y - 8, 990, y); ctx.stroke(); }
+    ctx.restore(); box(S, '紙卡', 60, 1420, 960, 300);
+    txt(ctx, S, '大字', S.caption, 540, 1530, { size: 76, weight: 900, color: '#fff8e7', stroke: '#5a3a1a', strokeW: 8, maxW: 880, lines: 1, scale: S.pop, alpha: p });
+    txt(ctx, S, '小字', S.sub, 540, 1645, { size: 42, weight: 700, color: '#f1dca7', maxW: 880, lines: 1, alpha: p });
+  },
+  polaroid(ctx, S) {
+    const { lt, shot, k } = S;
+    ctx.save(); ctx.fillStyle = 'rgba(255,228,150,0.75)'; [[220, 150, -0.35], [860, 150, 0.3]].forEach(([x, y, a]) => { ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillRect(-100, -26, 200, 52); ctx.restore(); }); ctx.restore();
+    const a = ease(lt / 0.5);
+    txt(ctx, S, '大字', S.caption, 540, 1400, { size: 72, weight: 800, color: '#2b2b2b', maxW: 800, lines: 1, font: HAND, alpha: a, scale: S.pop });
+    ctx.save(); ctx.globalAlpha = a; wobblyLine(ctx, Array.from({ length: 10 }, (_, q) => [260 + q * 62 * a, 1455]), 70 + k, 6, '#e76f51'); ctx.restore();
+    txt(ctx, S, '小字', S.sub, 540, 1515, { size: 40, weight: 700, color: '#7a5c3e', maxW: 800, lines: 1, alpha: ease((lt - 0.2) / 0.4) });
+    if (shot.role === 'point') drawStar(ctx, 175, 1585, 30, 5, '#f59f00', 0.2);
+    if (shot.role === 'cta') drawHeart(ctx, 175, 1585, 60, '#ff5c8a');
+    txt(ctx, S, '介面', `No.${k + 1}`, 940, 1600, { size: 30, weight: 700, color: '#a08060', align: 'right', lines: 1 });
+  },
+  chat(ctx, S) {
+    const { lt, t } = S;
+    ctx.save(); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, VW, 200); ctx.fillStyle = '#e2e8f0'; ctx.fillRect(0, 198, VW, 2); ctx.fillStyle = '#7c9cff'; ctx.beginPath(); ctx.arc(110, 120, 44, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    box(S, '台標', 0, 0, VW, 200);
+    txt(ctx, S, '台標文字', '好物分享群', 180, 105, { size: 44, weight: 900, color: '#1e293b', align: 'left', lines: 1 });
+    txt(ctx, S, '台標文字', '● 線上', 180, 155, { size: 28, weight: 700, color: '#22c55e', align: 'left', lines: 1 });
+    const p1 = springy((lt - 0.25) / 0.4), p2 = springy((lt - 0.65) / 0.4);
+    if (p1 <= 0.02) { ctx.save(); ctx.fillStyle = '#4f7cff'; rrect(ctx, 850, 1380, 170, 84, 40); ctx.fill(); ctx.fillStyle = '#fff'; for (let q = 0; q < 3; q++) { ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(t * 6 + q)); ctx.beginPath(); ctx.arc(895 + q * 40, 1422, 10, 0, Math.PI * 2); ctx.fill(); } ctx.restore(); }
+    txt(ctx, S, '大字', S.caption, 1020, 1420, { size: 64, weight: 800, color: '#fff', bg: '#4f7cff', padX: 34, padY: 22, radius: 40, align: 'right', maxW: 760, lines: 1, alpha: Math.max(0, Math.min(1, p1 * 2)), scale: Math.max(0.6, Math.min(1, 0.6 + 0.4 * p1)) });
+    txt(ctx, S, '小字', S.sub, 60, 1590, { size: 42, weight: 700, color: '#1e293b', bg: '#fff', padX: 30, padY: 20, radius: 36, align: 'left', maxW: 760, lines: 1, alpha: Math.max(0, Math.min(1, p2 * 2)) });
+  },
+  countdown(ctx, S) {
+    const { lt, shot } = S, no = pointTotal(S) - pointNo(S) + 1;
+    const big = shot.role === 'point' ? String(no) : shot.role === 'hook' ? '?' : shot.role === 'intro' ? 'GO' : '!';
+    const label = shot.role === 'point' ? `重點 ${no}` : shot.role === 'hook' ? '準備倒數' : shot.role === 'intro' ? '開始倒數' : '倒數完成';
+    const p = Math.max(0, Math.min(1.1, springy((lt - 0.05) / 0.5)));
+    ctx.save(); ctx.fillStyle = '#facc15'; ctx.beginPath(); ctx.arc(170, 230, 120 * p, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    box(S, '標籤框', 50, 110, 240, 240);
+    txt(ctx, S, '標籤', big, 170, 235, { size: 140, weight: 900, color: '#111', lines: 1, maxW: 200, scale: Math.max(0.01, Math.min(1, p)), font: `Impact,${VFONT}` });
+    txt(ctx, S, '介面', label, 330, 230, { size: 56, weight: 900, color: '#fff', stroke: '#000', strokeW: 10, align: 'left', lines: 1 });
+    capBlock(ctx, S, { y: 1440, h: 260, x: 40, w: 1000, bg: 'rgba(0,0,0,0.82)', radius: 20, sub: { color: '#facc15' } });
+    ctx.save(); ctx.fillStyle = '#facc15'; ctx.fillRect(40, 1440, 16, 260); ctx.restore();
+  },
+  museum(ctx, S) {
+    const { lt } = S, [fx, fy, fw, fh] = STYLES.museum.frame;
+    ctx.save(); ctx.strokeStyle = '#c9a227'; ctx.lineWidth = 10; ctx.strokeRect(fx - 12, fy - 12, fw + 24, fh + 24); ctx.lineWidth = 2; ctx.strokeRect(fx - 28, fy - 28, fw + 56, fh + 56); ctx.restore();
+    txt(ctx, S, '介面', '好 物 特 展', 540, 150, { size: 50, weight: 700, color: '#c9a227', lines: 1, font: SERIF });
+    const a = ease(lt / 0.6);
+    ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = '#f5f1e8'; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 20; ctx.fillRect(160, 1420, 760, 270); ctx.shadowBlur = 0; ctx.fillStyle = '#c9a227'; ctx.fillRect(470, 1566, 140, 3); ctx.restore();
+    box(S, '紙卡', 160, 1420, 760, 270);
+    txt(ctx, S, '大字', S.caption, 540, 1512, { size: 66, weight: 900, color: '#1f1a17', maxW: 680, lines: 1, font: SERIF, alpha: a });
+    txt(ctx, S, '小字', S.sub, 540, 1620, { size: 36, weight: 600, color: '#6b625b', maxW: 680, lines: 1, alpha: a });
+  },
+  travel(ctx, S) {
+    const { lt, shot } = S;
+    const P = [[80, 120], [360, 40], [720, 200], [1000, 110]], u = Math.min(1, (S.k + Math.min(1, lt / S.d)) / S.n);
+    const bz = (i) => (1 - u) ** 3 * P[0][i] + 3 * (1 - u) ** 2 * u * P[1][i] + 3 * (1 - u) * u * u * P[2][i] + u ** 3 * P[3][i];
+    ctx.save(); ctx.strokeStyle = '#c8553d'; ctx.lineWidth = 5; ctx.setLineDash([18, 14]); ctx.beginPath(); ctx.moveTo(...P[0]); ctx.bezierCurveTo(...P[1], ...P[2], ...P[3]); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#2a6f97'; ctx.font = `64px ${VFONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✈', bz(0), bz(1)); ctx.restore();
+    if (shot.role === 'point' || shot.role === 'cta') {
+      const p = springy((lt - 0.3) / 0.5);
+      if (p > 0) { const s = 1.5 - 0.5 * Math.min(1, p); ctx.save(); ctx.globalAlpha = Math.min(1, p) * 0.9; ctx.translate(880, 360); ctx.rotate(-0.25); ctx.scale(s, s); ctx.strokeStyle = '#2a6f97'; ctx.lineWidth = 8; ctx.beginPath(); ctx.arc(0, 0, 100, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 84, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = '#2a6f97'; ctx.font = `900 44px ${VFONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(shot.role === 'cta' ? '出發！' : `STOP ${pointNo(S)}`, 0, 0); ctx.restore(); }
+    }
+    const a = ease(lt / 0.3);
+    ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = '#f6bd60'; rrect(ctx, 60, 1420, 960, 290, 30); ctx.fill(); ctx.fillStyle = '#f3e9d2'; ctx.beginPath(); ctx.arc(120, 1565, 22, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#7a4f2a'; ctx.lineWidth = 4; ctx.stroke(); ctx.restore();
+    box(S, '紙卡', 60, 1420, 960, 290);
+    txt(ctx, S, '大字', S.caption, 580, 1522, { size: 74, weight: 900, color: '#3d2c1e', maxW: 800, lines: 1, scale: S.pop, alpha: a });
+    txt(ctx, S, '小字', S.sub, 580, 1635, { size: 40, weight: 700, color: '#7a4f2a', maxW: 800, lines: 1, alpha: a });
+  },
+  stage(ctx, S) {
+    const { t, lt, shot } = S;
+    txt(ctx, S, '介面', '★ 好物登台 ★', 540, 180, { size: 54, weight: 900, color: '#ffe08a', glow: '#ffb703', glowBlur: 26, lines: 1 });
+    const x0 = 120, y0 = 1390, w = 840, h = 310, p = ease(lt / 0.3), ph = Math.floor(t * 4) % 2;
+    ctx.save(); ctx.globalAlpha = p; ctx.fillStyle = '#2b0a12'; rrect(ctx, x0, y0, w, h, 26); ctx.fill(); ctx.strokeStyle = '#ffb703'; ctx.lineWidth = 6; rrect(ctx, x0 + 18, y0 + 18, w - 36, h - 36, 18); ctx.stroke();
+    let n = 0; const bulb = (x, y) => { ctx.fillStyle = n++ % 2 === ph ? '#fff3b0' : '#b8860b'; ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill(); };
+    for (let x = x0 + 30; x <= x0 + w - 30; x += 40) { bulb(x, y0 + 6); bulb(x, y0 + h - 6); }
+    for (let y = y0 + 40; y <= y0 + h - 40; y += 40) { bulb(x0 + 6, y); bulb(x0 + w - 6, y); }
+    ctx.restore(); box(S, '紙卡', x0, y0, w, h);
+    txt(ctx, S, '大字', S.caption, 540, 1505, { size: 72, weight: 900, color: '#fff6d5', glow: '#ffb703', glowBlur: 22, maxW: 740, lines: 1, scale: S.pop, alpha: p });
+    txt(ctx, S, '小字', S.sub, 540, 1620, { size: 40, weight: 700, color: '#ffd166', maxW: 740, lines: 1, alpha: p });
+    if (shot.role === 'cta') { const r = rng(99), cols = ['#ffb703', '#fb5607', '#ff006e', '#8338ec', '#3a86ff']; for (let q = 0; q < 46; q++) { const x = r() * VW, sp = 300 + r() * 300, y = -40 + ((lt * sp + r() * 300) % 1400), a = lt * 6 + q; ctx.save(); ctx.translate(x + Math.sin(a) * 20, y); ctx.rotate(a); ctx.fillStyle = cols[q % 5]; ctx.fillRect(-9, -5, 18, 10); ctx.restore(); } }
+  },
+});
+for (const [k, s] of Object.entries(STYLES)) STYLE_OPTS[k] = s.name;
+
 /* ========== 算圖 ========== */
 const SHOT_MIN = 2.5, SHOT_MAX = 3.5;
 function buildRender(i, srcEls) {
@@ -529,6 +899,7 @@ function drawFrame(ctx, t, R, elFor) {
   if (st === STYLES.kraft) {   // 牛皮紙紋理
     const r = rng(3); ctx.fillStyle = 'rgba(90,60,20,0.08)'; for (let q = 0; q < 500; q++) ctx.fillRect(r() * VW, r() * VH, 2 + r() * 3, 2 + r() * 3);
   }
+  if (st.under) st.under(ctx, t);   // 部分風格的底層背景（星空、布幕、相紙…）
   // 震動
   if (!R.holding && shot.fx === 'shake' && lt < 0.45) { const a = (1 - lt / 0.45) * 16; ctx.translate(Math.sin(lt * 90) * a, Math.cos(lt * 70) * a); }
   const fr = st.frame || [0, 0, VW, VH];
@@ -674,7 +1045,7 @@ function layoutIssues(S) {
   }
   const inter = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
   // 只檢查「文字」之間、或文字壓到別的介面元件；同一組介面本身的文字（例如字幕條上的字）不算
-  const host = { 大字: ['字幕條', '紙卡'], 小字: ['字幕條', '紙卡'], 台標文字: ['台標'], 血條文字: ['血條'], VS: ['血條'], 片頭: ['黑邊'], 介面: [], 跑馬燈: [] };
+  const host = { 大字: ['字幕條', '紙卡'], 小字: ['字幕條', '紙卡'], 標籤: ['字幕條', '紙卡', '記分板', '標籤框', '台標'], 台標文字: ['台標'], 血條文字: ['血條'], VS: ['血條'], 片頭: ['黑邊'], 介面: [], 跑馬燈: [] };
   for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) {
     const A = L[a], B = L[b]; if (A.ui && B.ui) continue;
     const [T, U] = A.ui ? [B, A] : [A, B];

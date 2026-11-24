@@ -2,7 +2,12 @@
 // 金鑰只來自環境變數 GEMINI_API_KEY，或使用者以 x-gemini-key 標頭自備（不記錄、不寫日誌）。
 
 const TASKS = new Set(['analyze', 'video_plan']);
-const VIDEO_STYLES = 'weather|meme|trailer|neon|fighter|kraft|thermal|dating';
+// 影片風格代碼與說明（要和 public/video.js 的 STYLES 一致）
+const STYLE_DESC = { weather: '氣象播報', meme: '迷因爆笑', trailer: '電影預告', neon: '深夜霓虹', fighter: '格鬥遊戲對決', kraft: '牛皮紙手繪', thermal: '熱感應鏡頭', dating: '交友配對',
+  news: '新聞快報', cooking: '料理節目', sports: '體育轉播', scifi: '科幻全息', retro: '復古錄影帶', pixel: '像素遊戲', comic: '美式漫畫', magazine: '時尚雜誌',
+  minimal: '極簡質感', unbox: '開箱實驗室', detective: '偵探辦案', space: '太空任務', cute: '粉嫩可愛', guochao: '國潮紅金', ocean: '清新海洋', forest: '綠意自然',
+  polaroid: '拍立得相簿', chat: '聊天訊息', countdown: '重點倒數', museum: '展品鑑賞', travel: '旅行日誌', stage: '舞台聚光' };
+const VIDEO_STYLES = Object.keys(STYLE_DESC).join('|');
 // 影片分鏡專用的模型順序（實測 gemini-2.5-flash 最穩定）；每個模型最多等 12 秒，卡住就換下一個
 const VIDEO_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
@@ -68,7 +73,7 @@ carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${
       return { json: true, sys: VSYS, fast: true, perTry: 12000, models: [process.env.GEMINI_VIDEO_MODEL, ...VIDEO_MODELS], text: `請依使用者的提示詞，為一支商品實拍影片設計 9:16 直式、總長 ${dur} 秒左右的特色銷售短影音。你看不到影片，只能依提示詞判斷。
 實拍素材長度 ${n(p.duration)} 秒。
 使用者的提示詞：${s(p.prompt, 1500)}
-${style ? `使用者指定風格：${style}` : `風格請從以下選一個最有記憶點、最貼合商品核心感受或賣點的：${VIDEO_STYLES}（weather 氣象播報、meme 迷因爆笑、trailer 電影預告、neon 深夜霓虹、fighter 格鬥遊戲對決、kraft 牛皮紙手繪、thermal 熱感應鏡頭、dating 交友配對）`}
+${style ? `使用者指定風格：${style}` : `風格請從以下選一個最有記憶點、最貼合商品核心感受或賣點的：${VIDEO_STYLES}（${Object.entries(STYLE_DESC).map(([k, v]) => `${k} ${v}`).join('、')}）`}
 只輸出 JSON：
 {"prohibited":{"blocked":false,"reason":"若商品屬於台灣法規禁止廣告或不得一般廣告的類別（例如一歲以下嬰兒配方奶粉、處方藥、菸品、電子煙），blocked 為 true 並說明；否則 false、空字串"},
 "safety":"若商品有安全疑慮（刀具、電器、高溫、化學清潔劑、易燃、兒童誤食等），寫一句使用提醒（20 字內）；沒有就空字串",
