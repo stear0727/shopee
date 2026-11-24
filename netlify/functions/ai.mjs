@@ -1,8 +1,10 @@
 // /api/ai — 唯一的後端端點：任務白名單、伺服器端組裝提示詞、呼叫 Gemini。
 // 金鑰只來自環境變數 GEMINI_API_KEY，或使用者以 x-gemini-key 標頭自備（不記錄、不寫日誌）。
 
-const TASKS = new Set(['analyze', 'video_script']);
-const VIDEO_EFFECTS = 'lift|push|mist|shine|grid|pack';
+const TASKS = new Set(['analyze', 'video_plan']);
+const VIDEO_STYLES = 'weather|meme|trailer|neon|fighter|kraft|thermal|dating';
+// 影片分鏡專用的模型順序（實測 gemini-2.5-flash 最穩定）；每個模型最多等 12 秒，卡住就換下一個
+const VIDEO_MODELS = ['gemini-2.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
 const MAX_PAYLOAD = 12 * 1024;          // 結構化欄位上限 12 KB
 const MAX_IMAGE = 2_200_000;            // 壓縮後截圖 base64 上限（約 1.6 MB 原始）
 const DEFAULT_MODELS = ['gemini-3-flash', 'gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
@@ -18,6 +20,13 @@ const SYS = `你是電商聯盟行銷分析師，專精蝦皮分潤計畫與社�
 4. 分潤連結通常放在留言、限動連結或個人頁，請依平台建議。
 5. 一律提醒：貼文需揭露含分潤連結或合作關係、避免誇大或不實功效、價格與活動標註時效、使用實拍照片、不使用蝦皮商標造成官方誤認、遵守社團版規。
 6. 精簡，不寫開場白與客套話。`;
+
+const VSYS = `你是短影音剪輯師與台灣廣告法規審查員，協助電商賣家把自己拍攝的商品實拍影片剪成銷售短影音。
+規則：
+1. 一律使用繁體中文（台灣用語）。
+2. 文案只能使用商品包裝上實際印出的文字，不加療效、功效保證、比較性或包裝沒寫的說法；讀不清楚的字標註出來，不要猜測。
+3. 不出現日期、價格與金額。
+4. 只輸出要求的 JSON，不寫說明文字。`;
 
 const json = (status, obj) => new Response(JSON.stringify(obj), {
   status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -52,20 +61,29 @@ ${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(
 {"verdict":"一句話判斷","festivalPost":{"festival":"節慶名稱","post":"節慶活動貼文"},"posts":["3 則可直接發布的短貼文：每則 40–80 字、口語自然、第一句就抓住注意力（痛點、反差或驚喜）、帶 1–2 個 emoji、結尾有行動呼籲（例如「連結在留言／個人頁」）並加上「#含分潤連結」與 2–3 個相關 hashtag；三則風格不同（痛點型、開箱驚喜型、限時優惠型）"],"longPost":"一則 150–300 字的使用心得長文，適合 Facebook 社團或 Dcard：真實情境開頭、3 個重點、優缺點都提、結尾 CTA 與揭露","headlines":["3–5 個吸睛的第一句／標題"],"carousel":[{"slide":"第 1 張","title":"圖上大字","text":"說明"}],"imageIdeas":["3–4 個實拍照片建議（拍什麼、怎麼構圖）"],"strengths":["優勢"],"risks":["風險"],"cta":"行動呼籲（含連結放哪裡）","hashtags":["#標籤"],"bestTime":"建議發文時段與理由","replies":["2–3 個預想留言提問與建議回覆"],"tests":["A/B 測試建議"],"compliance":["合規提醒"]}
 carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${plat(p.platform)}，貼文形式：${s(p.format, 20) || '圖文貼文'}。${festText}` };
     }
-    case 'video_script': {
-      const k = Math.max(1, Math.min(8, n(p.imageCount) || 1));
-      const dur = Math.max(15, Math.min(45, n(p.seconds) || 25));
-      return { json: true, text: `請為以下商品寫一支 9:16 直式、約 ${dur} 秒的「第一人稱使用說明」短影音腳本。旁白會用語音合成念出；畫面由使用者提供的 ${k} 張商品照片做成動態（${hasImage ? '照片已依序附上，編號 0 到 ' + (k - 1) : '未附照片，請依常見商品照推想'}）。
-商品資料（使用者輸入，未經查證）：${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(p.price) })}
+    case 'video_plan': {
+      // 只依使用者輸入的提示詞設計風格、分鏡與文案（AI 不看影片）
+      const dur = Math.max(14, Math.min(19, n(p.seconds) || 17));
+      const style = new RegExp(`^(${VIDEO_STYLES})$`).test(p.style) ? p.style : '';
+      return { json: true, sys: VSYS, fast: true, perTry: 12000, models: [process.env.GEMINI_VIDEO_MODEL, ...VIDEO_MODELS], text: `請依使用者的提示詞，為一支商品實拍影片設計 9:16 直式、總長 ${dur} 秒左右的特色銷售短影音。你看不到影片，只能依提示詞判斷。
+影片名稱：${s(p.name, 60) || '（未命名）'}；實拍素材長度 ${n(p.duration)} 秒。
+使用者的提示詞：${s(p.prompt, 1500)}
+${style ? `使用者指定風格：${style}` : `風格請從以下選一個最有記憶點、最貼合商品核心感受或賣點的：${VIDEO_STYLES}（weather 氣象播報、meme 迷因爆笑、trailer 電影預告、neon 深夜霓虹、fighter 格鬥遊戲對決、kraft 牛皮紙手繪、thermal 熱感應鏡頭、dating 交友配對）`}
 只輸出 JSON：
-{"title":"影片標題（15 字內）","sections":[{"text":"旁白：第一人稱、口語，像在跟朋友示範怎麼用，12–26 字","card":"畫面上方字卡大字，2–10 字（可為空字串）","image":照片編號,"effect":"${VIDEO_EFFECTS} 其中之一","motion":"英文提示詞，40–80 words"}],"endTitle":"收尾大字：品牌＋品名，14 字內","endSub":"收尾小字：規格或一個賣點，16 字內"}
+{"prohibited":{"blocked":false,"reason":"若商品屬於台灣法規禁止廣告或不得一般廣告的類別（例如一歲以下嬰兒配方奶粉、處方藥、菸品、電子煙），blocked 為 true 並說明；否則 false、空字串"},
+"safety":"若商品有安全疑慮（刀具、電器、高溫、化學清潔劑、易燃、兒童誤食等），寫一句使用提醒（20 字內）；沒有就空字串",
+"style":"${style || '風格代碼'}","styleReason":"為什麼選這個風格（30 字內）","story":"分鏡劇情一句話（40 字內）",
+"shots":[{"role":"hook|intro|point|cta","caption":"畫面大字，2–12 字","sub":"畫面小字，0–18 字，可空字串","start":素材起始秒數,"move":"push|pull|panL|panR|panU|panD|static","fx":"bounce|flash|shake|fade|zoom","demo":false,"source":"文案依據：引用提示詞中的原文；開場痛點寫『情境描述』"}],
+"cta":"結尾購買引導，例如『現在就入手！』",
+"hashtags":["#關鍵字1","#關鍵字2","#關鍵字3","#關鍵字4","#關鍵字5"]}
 規則：
-1. 5–6 段，總旁白約 ${Math.round(dur * 3.6)} 字。第 1 段用痛點或好奇開場；中間段落依實際使用步驟示範（拿起、準備、使用、成果）；最後一段 effect 必須是 pack，旁白做收尾。
-2. effect 意義：lift＝產品被手拿起；push＝鏡頭慢慢推近；mist＝從產品噴出霧狀或氣體（只在噴霧、噴油、加濕、香氛等會噴出東西的商品使用）；shine＝光澤掃過強調質感；grid＝多張照片拼貼（展示多用途、多款式或多情境）；pack＝產品收尾畫面。同一種 effect 不要連續出現。
-3. image 選最符合該段內容的照片；pack 段優先選白底或乾淨背景、上面沒有大量文字的產品照。
-4. 只能使用商品名稱與照片中看得到的資訊；不要捏造功效、數據、認證或價格以外的數字；不要寫「最」「第一」等誇大用語。
-5. card 不要和旁白逐字重複，要更短、更像重點標語。
-6. motion 是這一段若改用 AI 生成第一人稱動態影片時的英文提示詞：first-person POV from the user's own eyes, only hands visible, no face, describe the hand action on the product, setting, lighting and camera; single continuous shot; no on-screen text; no dialogue.` };
+1. 5–6 個分鏡，每個 2.5–3.5 秒，依序為：痛點開場（hook）→ 商品登場（intro）→ 2–3 個賣點（point）→ 結尾購買引導（cta）。
+2. start 是該分鏡使用的素材起始秒數，平均分散在素材長度內（start＋3 秒不可超過素材長度），不同分鏡用不同片段。
+3. caption 與 sub 是觀眾會在畫面上看到的文字，只能使用提示詞裡的商品資訊（可以縮短、可以加驚嘆號與口語語氣詞），不可加入療效、功效保證、與他牌比較、或提示詞沒寫的說法，也不要自行加上提示詞沒有的形容詞（例如「大容量」「超輕巧」「最好用」）；開場痛點可以描述生活情境，但不可宣稱效果。不要把「情境描述」「文案依據」這類說明文字放進 caption 或 sub。提示詞中關於風格、語氣的要求要照做。
+4. 不要出現任何日期、價格、金額、折扣數字。
+5. demo：該分鏡若用畫出來的箭頭、步驟圖示來示意使用方式，設為 true（畫面會自動加上「※ 示意動畫，使用方式請依包裝說明」）。
+6. 自製介面元素不可模仿真實 App 或品牌（例如不要寫出任何真實 App 名稱）。
+7. hashtags 是發布 Instagram Reels 時建議標註的 5 個關鍵字：繁體中文為主、以 # 開頭、不含空白，涵蓋商品類別、使用情境、核心賣點、目標族群、熱門搜尋詞；不使用療效、誇大或與他牌比較的字眼，也不要用別家品牌名稱。` };
     }
   }
 }
@@ -103,22 +121,14 @@ export default async (req) => {
     }
     image = im;
   }
-  // 影片腳本：最多 6 張壓縮過的商品照片縮圖
-  let images = [];
-  if (task === 'video_script' && Array.isArray(payload.images)) {
-    images = payload.images.slice(0, 6);
-    const total = images.reduce((t, im) => t + String(im?.data || '').length, 0);
-    if (total > MAX_IMAGE || images.some((im) => !/^image\/(jpeg|png|webp)$/.test(im?.mime) || typeof im.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(im.data))) {
-      return json(400, { ok: false, error: '照片格式或大小不符' });
-    }
-  }
+  const images = [];
   const rest = { ...payload }; delete rest.image; delete rest.images;
   if (Buffer.byteLength(JSON.stringify(rest)) > MAX_PAYLOAD) return json(400, { ok: false, error: '資料過大（上限 12 KB），請縮小輸入' });
 
   const pr = build(task, rest, !!image || images.length > 0);
   const media = [...(image ? [image] : []), ...images].map((im) => ({ inline_data: { mime_type: im.mime, data: im.data } }));
   const reqBody = {
-    systemInstruction: { parts: [{ text: SYS }] },
+    systemInstruction: { parts: [{ text: pr.sys || SYS }] },
     contents: [{ role: 'user', parts: [{ text: pr.text }, ...media] }],
     generationConfig: { temperature: pr.low ? 0.1 : 0.7, maxOutputTokens: 8192, ...(pr.json ? { responseMimeType: 'application/json' } : {}) },
     ...(pr.search ? { tools: [{ google_search: {} }] } : {}),
@@ -126,17 +136,19 @@ export default async (req) => {
 
   // Gemini 3 預設思考程度高、回應慢（長文案常超過 25 秒），改用低思考程度加快速度；模型不支援時自動拿掉再試
   let thinkOff = false;
-  const bodyFor = (m) => (!thinkOff && /^gemini-3/.test(m)
-    ? { ...reqBody, generationConfig: { ...reqBody.generationConfig, thinkingConfig: { thinkingLevel: 'low' } } } : reqBody);
+  const bodyFor = (m) => (thinkOff ? reqBody
+    : /^gemini-3/.test(m) ? { ...reqBody, generationConfig: { ...reqBody.generationConfig, thinkingConfig: { thinkingLevel: 'low' } } }
+    : pr.fast && /^gemini-2\.5-flash/.test(m) ? { ...reqBody, generationConfig: { ...reqBody.generationConfig, thinkingConfig: { thinkingBudget: 0 } } }
+    : reqBody);
   const deadline = Date.now() + (Number(process.env.AI_TIMEOUT_MS) || 25000);
   let last = null;
-  const list = models();
+  const list = pr.models ? [...new Set(pr.models.map((m) => (m || '').trim()).filter(Boolean))] : models();
   for (let k = 0; k < list.length; k++) {
     const m = list[k];
     const left = deadline - Date.now();
     if (left < 1500) break;
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), left);
+    const t = setTimeout(() => ctl.abort(), pr.perTry && k < list.length - 1 ? Math.min(left, pr.perTry) : left);
     let r, j;
     try {
       r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
@@ -144,7 +156,10 @@ export default async (req) => {
       });
       j = await r.json().catch(() => ({}));
     } catch (e) {
-      if (e.name === 'AbortError') return json(504, { ok: false, error: 'AI 回應逾時，請縮小輸入或稍後重試' });
+      if (e.name === 'AbortError') {
+        if (pr.perTry && deadline - Date.now() > 1500) { last = { status: 504, msg: `模型 ${m} 回應太慢` }; continue; }   // 這個模型卡住：換下一個
+        return json(504, { ok: false, error: 'AI 回應逾時，請縮小輸入或稍後重試' });
+      }
       last = { status: 502, msg: '無法連線到 Gemini' };
       continue;
     } finally { clearTimeout(t); }
@@ -166,7 +181,8 @@ export default async (req) => {
     }
 
     const msg = j.error?.message || `HTTP ${r.status}`;
-    if (r.status === 400 && !thinkOff && /thinking/i.test(msg)) { thinkOff = true; k--; continue; }   // 不支援 thinkingLevel：同一個模型拿掉後重試
+    if (r.status === 400 && !thinkOff && /thinking/i.test(msg)) { thinkOff = true; k--; continue; }
+    if (r.status === 503) { last = { status: 503, msg: `Gemini 錯誤：${msg}` }; continue; }   // 這個模型忙碌：換下一個   // 不支援 thinkingLevel：同一個模型拿掉後重試
     if (r.status === 429) {
       // 各模型額度分開計算，先換下一個模型；全部都被限制才回 429
       const zero = /limit:\s*0\b/.test(msg);

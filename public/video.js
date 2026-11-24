@@ -1,34 +1,34 @@
 'use strict';
-/* ========== 🎬 影片製作：照片 → AI 腳本 → 配音 → （選用）AI 動態鏡頭 → 瀏覽器算圖輸出 ==========
- * 與 app.js 共用全域（$、esc、items、save、S、ai、toast、hashStr、ACT、VIEWS、RENDER…），所以必須在 app.js 之後載入。
- * 素材存在 /api/media（Netlify Blobs），腳本與設定存在商品的 i.video（跟著雲端同步）。
+/* ========== 🎬 影片製作：商品實拍影片 → AI 拆格分析 → 風格分鏡 → 關鍵畫面檢查 → 瀏覽器算圖輸出 ==========
+ * 與 app.js 共用全域（$、esc、store、S、ai、toast、opts、copy…），所以必須在 app.js 之後載入。
+ * 這是獨立功能：不使用、也不修改「商品分析」的商品清單。每支影片是一個「影片專案」，
+ * 專案資料存在這台瀏覽器的 localStorage（sp_vproj），實拍影片存在 IndexedDB，都不會上傳或雲端同步。
+ * 畫面上的字幕、圖示、插畫、特效全部用 Canvas 自行繪製；配樂與音效用 WebAudio 即時合成，不使用外部素材。
  */
-const VW = 1080, VH = 1920, PY = 420, PS = 1080;
+const VW = 1080, VH = 1920;
 const VFONT = '"Noto Sans TC","Microsoft JhengHei","PingFang TC","Heiti TC",sans-serif';
-const VC = { cream: '#EFE7DC', card: '#F7F1E8', ink: '#3B2F25', sub: 'rgba(59,47,37,0.78)' };
-const EFFECTS = { lift: '拿起', push: '慢慢推近', mist: '噴霧', shine: '光澤掃過', grid: '多圖拼貼', pack: '產品收尾', };
-const DIRS = { 180: '往左', 0: '往右', 270: '往上', 90: '往下', 200: '往左下', 160: '往左上', 340: '往右上', 20: '往右下' };
-const VOICES = { Kore: 'Kore（女・穩重）', Aoede: 'Aoede（女・輕快）', Leda: 'Leda（女・年輕）', Zephyr: 'Zephyr（女・明亮）', Puck: 'Puck（男・活潑）', Charon: 'Charon（男・沉穩）', Orus: 'Orus（男・堅定）', Fenrir: 'Fenrir（男・興奮）' };
-const DEF_STYLE = '台灣華語口音，自然輕鬆，像在跟朋友分享好用小物；不要播音腔，句尾不要拖長。';
-const MAX_IMGS = 8, OMNI_EST = 180;
-
-const vsafe = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 60);
-const V = (i) => {
-  if (!i.video || typeof i.video !== 'object') i.video = {};
-  const v = i.video;
-  v.images ||= []; v.sections ||= []; v.audio ||= {}; v.clips ||= {};
-  v.voice ||= { on: true, name: 'Kore', style: DEF_STYLE };
-  if (v.musicVol == null) v.musicVol = 0.12;
-  v.endTitle ??= ''; v.endSub ??= ''; v.seconds ||= 25;
-  return v;
+const N_FRAMES = 6, MAX_SRC_MB = 500, PROC_MAX = 1280;
+const DEMO_NOTE = '※ 示意動畫，使用方式請依包裝說明';
+const ROLES = { hook: '痛點開場', intro: '商品登場', point: '賣點', cta: '購買引導' };
+const TRANS = { auto: '自動', whip: '快速甩鏡', zoom: '推進放大', wipe: '斜向擦除', circle: '圓形展開', heart: '愛心展開', glitch: '故障雜訊', flash: '白光閃切', fade: '淡入淡出' };
+// 各風格適合的轉場：[商品登場用（最強烈）, …賣點之間輪流…, 結尾購買引導用]
+const STYLE_TRANS = {
+  weather: ['wipe', 'whip', 'zoom', 'wipe'], meme: ['zoom', 'whip', 'circle', 'flash'], trailer: ['flash', 'fade', 'zoom', 'fade'],
+  neon: ['glitch', 'zoom', 'whip', 'glitch'], fighter: ['flash', 'whip', 'zoom', 'flash'], kraft: ['wipe', 'whip', 'wipe', 'circle'],
+  thermal: ['glitch', 'zoom', 'glitch', 'flash'], dating: ['heart', 'whip', 'zoom', 'heart'],
 };
-let vSel = store.get('vSel', '');
-const vItem = () => items.find((x) => x.id === vSel);
-let vBusy = '';   // 目前進行中的工作（避免同時跑兩件事）
-let vSaveT = 0;
-const vSave = () => { clearTimeout(vSaveT); vSaveT = setTimeout(() => save.i(), 400); };
+const TR_DUR = 0.42;
+const MOVES = { push: '推近', pull: '拉遠', panL: '向左平移', panR: '向右平移', panU: '向上平移', panD: '向下平移', static: '固定' };
+const FXS = { bounce: '彈跳', flash: '閃光', shake: '震動', fade: '淡入', zoom: '衝擊放大' };
+const BLUR_KIND = { price: '價格', date: '日期／有效期限', promo: '促銷吊牌', other_brand: '別家商品', character: '他人角色', person: '人臉／個資', other: '其他' };
 
-/* ---------- 進度條 ---------- */
+/* ---------- 共用小工具 ---------- */
+const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+const springy = (x) => { x = Math.max(0, x); return 1 - Math.exp(-6 * x) * Math.cos(10 * x); };
+const lerp = (a, b, k) => a + (b - a) * k;
+const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const secs = (n) => (n >= 60 ? `${Math.floor(n / 60)} 分 ${Math.round(n % 60)} 秒` : `${Math.max(0, Math.round(n))} 秒`);
+const f1 = (n) => (Math.round(n * 10) / 10).toFixed(1);
 function vProg(id, p, label) {
   const el = document.getElementById(id); if (!el) return;
   if (p == null) { el.innerHTML = ''; return; }
@@ -37,656 +37,1091 @@ function vProg(id, p, label) {
   if (p < 0) bar.removeAttribute('value'); else bar.value = Math.round(Math.min(1, p) * 1000) / 10;
   el.querySelector('.vprog-l').textContent = label || '';
 }
-const secs = (n) => (n >= 60 ? `${Math.floor(n / 60)} 分 ${Math.round(n % 60)} 秒` : `${Math.max(0, Math.round(n))} 秒`);
+function rrect(ctx, x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
-/* ---------- 素材存取 ---------- */
-const mHead = (ct) => { const h = {}; if (ct) h['Content-Type'] = ct; if (S.accessCode) h['x-access-code'] = S.accessCode; if (S.ownKey) h['x-gemini-key'] = S.ownKey; return h; };
-const mCache = new Map();
-async function mFail(r) { const j = await r.json().catch(() => ({})); const e = new Error(j.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
-async function mPut(key, blob) {
-  const r = await fetch(`/api/media?key=${encodeURIComponent(key)}`, { method: 'PUT', headers: mHead(blob.type || 'application/octet-stream'), body: blob });
-  if (!r.ok) await mFail(r);
-  mCache.set(key, blob);
-}
-async function mGet(key, fresh) {
-  if (!fresh && mCache.has(key)) return mCache.get(key);
-  const r = await fetch(`/api/media?key=${encodeURIComponent(key)}`, { headers: mHead(), cache: 'no-store' });
-  if (!r.ok) await mFail(r);
-  const b = await r.blob();
-  if (!fresh) mCache.set(key, b);
-  return b;
-}
-const mDel = (key) => { mCache.delete(key); return fetch(`/api/media?key=${encodeURIComponent(key)}`, { method: 'DELETE', headers: mHead() }).catch(() => {}); };
-const urlCache = new Map();
-async function mUrl(key) { if (urlCache.has(key)) return urlCache.get(key); const u = URL.createObjectURL(await mGet(key)); urlCache.set(key, u); return u; }
+/* ---------- 實拍影片存在瀏覽器本機（IndexedDB） ---------- */
+const IDB = {
+  db: null,
+  open() { return (this.db ||= new Promise((res, rej) => { const r = indexedDB.open('shoopee-video', 1); r.onupgradeneeded = () => r.result.createObjectStore('src'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); })); },
+  async run(mode, fn) { const db = await this.open(); return new Promise((res, rej) => { const q = fn(db.transaction('src', mode).objectStore('src')); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }); },
+  get(k) { return this.run('readonly', (s) => s.get(k)); },
+  set(k, v) { return this.run('readwrite', (s) => s.put(v, k)); },
+  del(k) { return this.run('readwrite', (s) => s.delete(k)); },
+};
 
-/* ---------- 圖片處理 ---------- */
-async function shrink(file, max, q = 0.88) {
-  const bmp = await createImageBitmap(file);
-  const sc = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc);
-  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(bmp, 0, 0, c.width, c.height);
-  bmp.close?.();
-  return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('圖片轉換失敗'))), 'image/jpeg', q));
+/* ---------- 狀態 ---------- */
+const V = (i) => {
+  if (!i.video || i.video.ver !== 2) i.video = { ver: 2 };   // 舊版（照片模式）資料直接換新
+  const v = i.video;
+  v.blurOff ||= []; v.manualBlur ||= []; v.seconds ||= 17; v.style ??= '';
+  return v;
+};
+let vProjects = store.get('vproj', []);   // [{ id, name, createdAt, video }]
+let vSel = store.get('vProjSel', '');
+const vItem = () => vProjects.find((x) => x.id === vSel);
+const newProject = () => ({ id: `vp${Date.now().toString(36)}`, name: '未命名影片', createdAt: new Date().toISOString(), video: { ver: 2 } });
+const vSaveNow = () => store.set('vproj', vProjects);
+let vBusy = '', vSaveT = 0;
+const vSave = () => { clearTimeout(vSaveT); vSaveT = setTimeout(vSaveNow, 400); };
+const vDirty = (v) => { v.checked = false; };   // 分鏡、文案、模糊有改動 → 需要重新檢查關鍵畫面
+function vPick(id) { vStopAll(); vSel = id; store.set('vProjSel', vSel); thumbCache = { id: '', list: [] }; renderVideo(true); }
+
+/* ---------- 影片元素 ---------- */
+let srcUrl = '', srcFor = '';
+async function srcURL(i) {
+  if (srcFor === i.id && srcUrl) return srcUrl;
+  if (srcUrl) URL.revokeObjectURL(srcUrl);
+  srcUrl = ''; srcFor = i.id;
+  const b = await IDB.get(i.id).catch(() => null);
+  if (b) srcUrl = URL.createObjectURL(b);
+  return srcUrl;
 }
-const b64 = (blob) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+// 原始影片一律靜音：即使使用者在預覽播放器上把聲音打開，也會立刻再關掉
+function forceMute(el) { el.muted = true; el.defaultMuted = true; el.volume = 0; el.addEventListener('volumechange', () => { if (!el.muted || el.volume) { el.muted = true; el.volume = 0; } }); return el; }
+function mkVideo(url) { const el = forceMute(document.createElement('video')); el.playsInline = true; el.preload = 'auto'; el.crossOrigin = 'anonymous'; el.src = url; return el; }
+const vidReady = (el) => new Promise((res, rej) => {
+  if (el.readyState >= 2) return res();
+  el.onloadeddata = () => res();
+  el.onerror = () => rej(new Error('這支影片在瀏覽器裡無法播放，請轉成 MP4（H.264）後再上傳'));
+  setTimeout(res, 15000);
+});
+function seekTo(el, t) {
+  return new Promise((res) => {
+    const target = Math.max(0, Math.min(t, (el.duration || 0) - 0.05));
+    if (Math.abs(el.currentTime - target) < 0.01 && el.readyState >= 2) return res();
+    const done = () => { el.removeEventListener('seeked', done); clearTimeout(tm); res(); };
+    const tm = setTimeout(done, 4000);
+    el.addEventListener('seeked', done); el.currentTime = target;
+  });
+}
+
+/* ---------- 畫面縮圖（分析與檢查用） ---------- */
+function grabSnap(el, max, q = 0.75) {
+  const sc = Math.min(1, max / Math.max(el.videoWidth, el.videoHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(el.videoWidth * sc); c.height = Math.round(el.videoHeight * sc);
+  c.getContext('2d').drawImage(el, 0, 0, c.width, c.height);
+  return { canvas: c, data: c.toDataURL('image/jpeg', q) };
+}
+const frameTimes = (dur, n) => Array.from({ length: n }, (_, k) => Math.round((0.25 + (dur - 0.5) * (k + 0.5) / n) * 10) / 10);
+let thumbCache = { id: '', list: [] };   // 分析用的畫面縮圖（只在記憶體，重新整理後會從本機影片重新擷取）
+async function grabFrames(i, times, onStep) {
+  const url = await srcURL(i); if (!url) throw new Error('這台裝置上找不到這支商品的實拍影片，請重新選擇影片檔');
+  const el = mkVideo(url); await vidReady(el);
+  const out = [];
+  for (const [k, t] of times.entries()) { await seekTo(el, t); out.push(grabSnap(el, 512, 0.7)); onStep?.((k + 1) / times.length); }
+  el.removeAttribute('src'); el.load();
+  thumbCache = { id: i.id, list: out };
+  return out;
+}
+
+/* ========== 風格 ==========
+ * frame：實拍畫面在 1080×1920 中的位置；filter：調色（支援 canvas filter 的瀏覽器）；tint：不支援時用疊色近似
+ * music：合成配樂參數；draw：自繪的字幕、圖示、介面與特效
+ */
+const STYLES = {
+  weather: { name: '氣象播報', bg: '#0b2f5c', filter: 'saturate(1.12) brightness(1.05)', tint: ['#4aa3ff', 0.12, 'soft-light'],
+    music: { bpm: 112, minor: false, root: 60, drums: 'pop', bass: 'roots', lead: 'arp8', bassWave: 'triangle', leadWave: 'triangle', amb: 'wind' } },
+  meme: { name: '迷因爆笑', bg: '#111', filter: 'saturate(1.4) contrast(1.12)', tint: ['#ffd400', 0.12, 'overlay'],
+    music: { bpm: 128, minor: false, root: 62, drums: 'pop', bass: 'bounce', lead: 'arp16', bassWave: 'square', leadWave: 'square', amb: '' } },
+  trailer: { name: '電影預告', bg: '#000', filter: 'contrast(1.18) saturate(0.85) sepia(0.12)', tint: ['#0a4d5c', 0.28, 'soft-light'],
+    music: { bpm: 84, minor: true, root: 50, drums: 'trailer', bass: 'drone', lead: 'none', bassWave: 'sawtooth', leadWave: 'triangle', amb: '' } },
+  neon: { name: '深夜霓虹', bg: '#0a0614', filter: 'brightness(0.8) contrast(1.22) saturate(1.35) hue-rotate(-12deg)', tint: ['#7a2cff', 0.3, 'soft-light'],
+    music: { bpm: 100, minor: true, root: 57, drums: 'halftime', bass: '8ths', lead: 'pad', bassWave: 'sawtooth', leadWave: 'sawtooth', amb: 'rain' } },
+  fighter: { name: '格鬥遊戲對決', bg: '#120400', filter: 'saturate(1.3) contrast(1.16)', tint: ['#ff5a00', 0.15, 'overlay'],
+    music: { bpm: 150, minor: true, root: 52, drums: '4floor', bass: '16ths', lead: 'arp16', bassWave: 'sawtooth', leadWave: 'square', amb: '' } },
+  kraft: { name: '牛皮紙手繪', bg: '#c9a46b', filter: 'sepia(0.28) saturate(0.95) contrast(1.05)', tint: ['#b07a3a', 0.2, 'soft-light'], frame: [70, 150, 940, 1500],
+    music: { bpm: 96, minor: false, root: 64, drums: 'claps', bass: 'roots', lead: 'arp8', bassWave: 'triangle', leadWave: 'triangle', amb: '' } },
+  thermal: { name: '熱感應鏡頭', bg: '#000', thermal: true,
+    music: { bpm: 120, minor: true, root: 55, drums: '4floor', bass: '8ths', lead: 'beep', bassWave: 'square', leadWave: 'sine', amb: 'hum' } },
+  dating: { name: '交友配對', bg: '#ffe9f1', filter: 'saturate(1.12) brightness(1.06)', tint: ['#ff7aa8', 0.12, 'soft-light'], frame: [60, 190, 960, 1290], round: 44,
+    music: { bpm: 116, minor: false, root: 65, drums: 'pop', bass: 'roots', lead: 'pad', bassWave: 'triangle', leadWave: 'triangle', amb: '' } },
+};
+const STYLE_OPTS = { '': '🤖 由 AI 依商品挑選', ...Object.fromEntries(Object.entries(STYLES).map(([k, s]) => [k, s.name])) };
+const canFilter = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
+
+/* ---------- 文字繪製（記錄版面位置，供關鍵畫面檢查重疊與超出範圍） ---------- */
+function wrapLines(ctx, text, maxW, maxLines) {
+  const lines = []; let cur = '';
+  for (const ch of String(text)) { if (ctx.measureText(cur + ch).width > maxW && cur) { lines.push(cur); cur = ch; } else cur += ch; }
+  if (cur) lines.push(cur);
+  return { lines: lines.slice(0, maxLines), cut: lines.length > maxLines };
+}
+function txt(ctx, S, tag, text, x, y, o = {}) {
+  if (!text) return null;
+  const size = o.size || 60, lh = size * (o.lh || 1.22);
+  ctx.save();
+  ctx.font = `${o.weight || 800} ${size}px ${o.font || VFONT}`;
+  ctx.textAlign = o.align || 'center'; ctx.textBaseline = 'middle';
+  const { lines, cut } = wrapLines(ctx, text, o.maxW || 940, o.lines || 2);
+  const w = Math.max(...lines.map((l) => ctx.measureText(l).width)), h = lines.length * lh;
+  const left = ctx.textAlign === 'center' ? x - w / 2 : ctx.textAlign === 'right' ? x - w : x;
+  const top = y - h / 2;
+  const padX = o.padX ?? 28, padY = o.padY ?? 14;
+  if (o.alpha != null) ctx.globalAlpha *= o.alpha;
+  if (o.scale && o.scale !== 1) { ctx.translate(x, y); ctx.scale(o.scale, o.scale); ctx.translate(-x, -y); }
+  if (o.rot) { ctx.translate(x, y); ctx.rotate(o.rot); ctx.translate(-x, -y); }
+  if (o.bg) { ctx.fillStyle = o.bg; rrect(ctx, left - padX, top - padY, w + padX * 2, h + padY * 2, o.radius ?? 18); ctx.fill(); }
+  lines.forEach((l, n) => {
+    const ly = top + lh * n + lh / 2;
+    if (o.glow) { ctx.shadowColor = o.glow; ctx.shadowBlur = o.glowBlur || 28; }
+    if (o.stroke) { ctx.lineJoin = 'round'; ctx.strokeStyle = o.stroke; ctx.lineWidth = o.strokeW || size * 0.16; ctx.strokeText(l, x, ly); }
+    ctx.fillStyle = o.color || '#fff'; ctx.fillText(l, x, ly);
+    if (o.glow) { ctx.shadowBlur = (o.glowBlur || 28) / 2; ctx.fillText(l, x, ly); }
+  });
+  ctx.restore();
+  const r = { tag, text, x: left - (o.bg ? padX : 0), y: top - (o.bg ? padY : 0), w: w + (o.bg ? padX * 2 : 0), h: h + (o.bg ? padY * 2 : 0), cut };
+  S.layout.push(r);
+  return r;
+}
+const box = (S, tag, x, y, w, h) => S.layout.push({ tag, x, y, w, h, ui: true });
+
+/* ---------- 自繪圖示 ---------- */
+function drawSun(ctx, x, y, r, t) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(t * 0.8); ctx.strokeStyle = '#ffd23f'; ctx.lineWidth = r * 0.16; ctx.lineCap = 'round';
+  for (let k = 0; k < 8; k++) { ctx.rotate(Math.PI / 4); ctx.beginPath(); ctx.moveTo(r * 1.25, 0); ctx.lineTo(r * 1.65, 0); ctx.stroke(); }
+  ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+}
+function drawCloud(ctx, x, y, r, rain, t) {
+  ctx.save(); ctx.fillStyle = '#eef4ff';
+  [[0, 0, 1], [-0.9, 0.25, 0.7], [0.9, 0.25, 0.75], [0.35, -0.35, 0.8]].forEach(([dx, dy, k]) => { ctx.beginPath(); ctx.arc(x + dx * r, y + dy * r, r * k, 0, Math.PI * 2); ctx.fill(); });
+  if (rain) { ctx.strokeStyle = '#6fb6ff'; ctx.lineWidth = r * 0.12; ctx.lineCap = 'round'; for (let k = 0; k < 4; k++) { const ox = x - r * 0.9 + k * r * 0.6, oy = y + r * 1.05 + ((t * 2 + k * 0.3) % 1) * r * 0.6; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox - r * 0.12, oy + r * 0.35); ctx.stroke(); } }
+  ctx.restore();
+}
+function drawHeart(ctx, x, y, s, color) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s / 100, s / 100); ctx.fillStyle = color; ctx.beginPath();
+  ctx.moveTo(0, 30); ctx.bezierCurveTo(-60, -10, -40, -60, 0, -30); ctx.bezierCurveTo(40, -60, 60, -10, 0, 30); ctx.fill(); ctx.restore();
+}
+function drawStar(ctx, x, y, r, n, color, rot = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot); ctx.fillStyle = color; ctx.beginPath();
+  for (let k = 0; k < n * 2; k++) { const rr = k % 2 ? r * 0.5 : r, a = (k / (n * 2)) * Math.PI * 2; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function wobblyLine(ctx, pts, seed, w, color) {
+  const r = rng(seed); ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath();
+  pts.forEach(([x, y], k) => { const jx = (r() - 0.5) * 5, jy = (r() - 0.5) * 5; if (k) ctx.lineTo(x + jx, y + jy); else ctx.moveTo(x + jx, y + jy); });
+  ctx.stroke(); ctx.restore();
+}
+function drawArrow(ctx, x1, y1, x2, y2, seed, color, w = 10) {
+  wobblyLine(ctx, Array.from({ length: 9 }, (_, k) => [lerp(x1, x2, k / 8), lerp(y1, y2, k / 8) + Math.sin(k / 8 * Math.PI) * -30]), seed, w, color);
+  const a = Math.atan2(y2 - y1, x2 - x1);
+  wobblyLine(ctx, [[x2 - Math.cos(a - 0.5) * 50, y2 - Math.sin(a - 0.5) * 50], [x2, y2], [x2 - Math.cos(a + 0.5) * 50, y2 - Math.sin(a + 0.5) * 50]], seed + 1, w, color);
+}
+
+/* ---------- 各風格的自繪介面 ---------- */
+const STYLE_DRAW = {
+  weather(ctx, S) {
+    const { t, lt, shot } = S;
+    // 左上角台標（自創，不模仿真實電視台）
+    ctx.save(); ctx.fillStyle = 'rgba(8,40,90,0.85)'; rrect(ctx, 40, 70, 410, 86, 16); ctx.fill();
+    ctx.fillStyle = Math.floor(t * 2) % 2 ? '#ff3b3b' : '#ff8a8a'; ctx.beginPath(); ctx.arc(84, 113, 14, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    box(S, '台標', 40, 70, 410, 86);
+    txt(ctx, S, '台標文字', '商品氣象台 LIVE', 270, 113, { size: 40, weight: 800, color: '#fff' });
+    // 右上天氣圖示：開場陰雨 → 之後放晴
+    if (shot.role === 'hook') drawCloud(ctx, 900, 140, 52, true, t); else drawSun(ctx, 900, 135, 46, t);
+    box(S, '天氣圖示', 820, 60, 160, 160);
+    // 下方字幕條
+    const slide = ease(lt / 0.35), y0 = 1430;
+    ctx.save(); ctx.translate((1 - slide) * -1080, 0);
+    const g = ctx.createLinearGradient(0, y0, 1080, y0); g.addColorStop(0, '#0b5cad'); g.addColorStop(1, '#1d8fe8');
+    ctx.fillStyle = g; ctx.fillRect(0, y0, 1080, 190); ctx.fillStyle = '#ffd23f'; ctx.fillRect(0, y0, 18, 190);
+    ctx.fillStyle = 'rgba(232,241,255,0.95)'; ctx.fillRect(0, y0 + 190, 1080, 86);
+    ctx.restore();
+    box(S, '字幕條', 0, y0, 1080, 276);
+    txt(ctx, S, '大字', S.caption, 560, y0 + 95, { size: 76, color: '#fff', maxW: 960, lines: 1, scale: S.pop });
+    txt(ctx, S, '小字', S.sub, 560, y0 + 233, { size: 40, weight: 700, color: '#0b3f7a', maxW: 960, lines: 1 });
+    // 跑馬燈
+    ctx.save(); ctx.fillStyle = '#082a52'; ctx.fillRect(0, 1730, 1080, 70); ctx.beginPath(); ctx.rect(0, 1730, 1080, 70); ctx.clip();
+    ctx.font = `700 36px ${VFONT}`; ctx.fillStyle = '#cfe6ff'; ctx.textBaseline = 'middle';
+    const tk = `　◆　${S.ticker}`, tw = ctx.measureText(tk).width || 1, off = (t * 160) % tw;
+    for (let x = -off; x < 1080; x += tw) ctx.fillText(tk, x, 1765);
+    ctx.restore(); box(S, '跑馬燈', 0, 1730, 1080, 70);
+  },
+  meme(ctx, S) {
+    const { lt, shot } = S;
+    txt(ctx, S, '大字', S.caption, 540, 300, { size: 104, weight: 900, color: '#fff', stroke: '#000', strokeW: 16, maxW: 980, scale: S.pop, rot: Math.sin(lt * 9) * 0.015 });
+    txt(ctx, S, '小字', S.sub, 540, 1600, { size: 62, weight: 900, color: '#ffe600', stroke: '#000', strokeW: 12, maxW: 980 });
+    if (shot.role === 'point' || shot.role === 'cta') {
+      const p = springy((lt - 0.25) / 0.5);
+      if (p > 0) { drawStar(ctx, 880, 560, 120 * p, 12, '#ff2d55', lt); txt(ctx, S, '爆炸貼紙', shot.role === 'cta' ? '衝！' : '讚！', 880, 560, { size: 64 * Math.max(0.01, p), weight: 900, color: '#fff', stroke: '#000', strokeW: 8, maxW: 220, lines: 1 }); }
+    }
+    if (shot.role === 'hook') { const p = ease((lt - 0.3) / 0.3); if (p > 0) txt(ctx, S, '爆炸貼紙', '？？？', 200, 600, { size: 90, weight: 900, color: '#fff', stroke: '#000', strokeW: 12, alpha: p, rot: -0.2, lines: 1 }); }
+  },
+  trailer(ctx, S) {
+    const { lt, d } = S;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 1080, 250); ctx.fillRect(0, 1670, 1080, 250);
+    box(S, '黑邊', 0, 0, 1080, 250); box(S, '黑邊', 0, 1670, 1080, 250);
+    const a = Math.min(ease(lt / 0.5), 1 - ease((lt - d + 0.35) / 0.35));
+    txt(ctx, S, '大字', S.caption, 540, 960, { size: 92, weight: 900, color: '#f6e7c8', maxW: 940, alpha: a, glow: 'rgba(255,200,120,0.55)', glowBlur: 24, scale: 1 + 0.04 * (lt / d) });
+    txt(ctx, S, '小字', S.sub, 540, 1110, { size: 44, weight: 600, color: '#e8e1d6', maxW: 900, alpha: a * 0.95, lines: 1 });
+    txt(ctx, S, '片頭', S.k === 0 ? '本 季 生 活 必 備' : '', 540, 125, { size: 38, weight: 700, color: '#bfb6a8', alpha: a, lines: 1 });
+  },
+  neon(ctx, S) {
+    const { t, lt } = S;
+    const r = rng(7);
+    ctx.save(); ctx.strokeStyle = 'rgba(160,200,255,0.35)'; ctx.lineWidth = 2;
+    for (let k = 0; k < 70; k++) { const x = r() * 1080, sp = 900 + r() * 600, y = ((r() * 1920 + t * sp) % 2000) - 80; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 6, y + 40); ctx.stroke(); }
+    ctx.restore();
+    const fl = (Math.floor(t * 12) % 17 === 0) ? 0.55 : 1;
+    ctx.save(); ctx.strokeStyle = '#ff3ea5'; ctx.lineWidth = 8; ctx.shadowColor = '#ff3ea5'; ctx.shadowBlur = 30; ctx.globalAlpha = fl; rrect(ctx, 46, 60, 988, 1800, 40); ctx.stroke(); ctx.restore();
+    txt(ctx, S, '大字', S.caption, 540, 1420, { size: 92, weight: 900, color: '#fff2fb', glow: '#ff3ea5', glowBlur: 40, maxW: 920, alpha: fl * ease(lt / 0.3), scale: S.pop });
+    txt(ctx, S, '小字', S.sub, 540, 1590, { size: 48, weight: 800, color: '#e8fdff', glow: '#3ef2ff', glowBlur: 26, maxW: 900, lines: 1, alpha: ease((lt - 0.2) / 0.3) });
+  },
+  fighter(ctx, S) {
+    const { lt, shot, k, n } = S;
+    // 上方血條（自創對戰介面）：左＝生活困擾，右＝商品
+    const hitsBefore = S.shots.slice(0, k).filter((s) => s.role === 'point').length + (shot.role === 'point' ? ease((lt - 0.3) / 0.3) : 0);
+    const pts = Math.max(1, S.shots.filter((s) => s.role === 'point').length);
+    const foe = shot.role === 'cta' ? 0 : Math.max(0.06, 1 - hitsBefore / (pts + 0.6));
+    ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(30, 70, 1020, 110);
+    const bar = (x, w, v, col, right) => { ctx.fillStyle = '#3a0000'; ctx.fillRect(x, 120, w, 36); ctx.fillStyle = col; const vw = w * v; ctx.fillRect(right ? x + w - vw : x, 120, vw, 36); ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.strokeRect(x, 120, w, 36); };
+    bar(50, 420, foe, '#ff3b30', false); bar(610, 420, 1, '#ffd60a', true); ctx.restore();
+    box(S, '血條', 30, 70, 1020, 110);
+    txt(ctx, S, '血條文字', '生活困擾', 60, 96, { size: 30, weight: 900, color: '#fff', align: 'left', lines: 1, maxW: 300 });
+    txt(ctx, S, '血條文字', S.short, 1020, 96, { size: 30, weight: 900, color: '#fff', align: 'right', lines: 1, maxW: 330 });
+    txt(ctx, S, 'VS', 'VS', 540, 138, { size: 52, weight: 900, color: '#ffd60a', stroke: '#b00000', strokeW: 8, lines: 1 });
+    // 大標語
+    const call = shot.role === 'hook' ? 'ROUND 1' : shot.role === 'intro' ? 'FIGHT!' : shot.role === 'cta' ? 'K.O.!' : `COMBO ×${k}`;
+    const p = springy((lt - 0.05) / 0.45), fade = 1 - ease((lt - 1.1) / 0.3);
+    if (fade > 0 && p > 0) txt(ctx, S, '對戰標語', call, 540, 760, { size: 150, weight: 900, color: '#ffd60a', stroke: '#8b0000', strokeW: 18, scale: 0.4 + 0.6 * p, alpha: fade, lines: 1 });
+    txt(ctx, S, '大字', S.caption, 540, 1500, { size: 84, weight: 900, color: '#fff', stroke: '#c1121f', strokeW: 14, maxW: 960, scale: S.pop, rot: -0.03 });
+    txt(ctx, S, '小字', S.sub, 540, 1650, { size: 46, weight: 800, color: '#ffd60a', stroke: '#000', strokeW: 8, maxW: 940, lines: 1 });
+    void n;
+  },
+  kraft(ctx, S) {
+    const { lt, shot, k } = S;
+    // 膠帶
+    ctx.save(); ctx.fillStyle = 'rgba(255,245,210,0.7)';
+    [[150, 160, -0.3], [930, 160, 0.3]].forEach(([x, y, a]) => { ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillRect(-90, -24, 180, 48); ctx.restore(); });
+    ctx.restore();
+    // 標題卡（手寫風）
+    const p = ease(lt / 0.35);
+    ctx.save(); ctx.translate(540, 1500); ctx.rotate(-0.025 + (k % 2) * 0.05); ctx.globalAlpha = p;
+    ctx.fillStyle = '#fbf3e2'; ctx.shadowColor = 'rgba(60,40,10,0.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 8; ctx.fillRect(-460, -110, 920, 220); ctx.restore();
+    box(S, '紙卡', 80, 1390, 920, 220);
+    txt(ctx, S, '大字', S.caption, 540, 1470, { size: 76, weight: 900, color: '#4a2f12', maxW: 840, lines: 1, scale: S.pop });
+    txt(ctx, S, '小字', S.sub, 540, 1555, { size: 42, weight: 700, color: '#7a5326', maxW: 840, lines: 1 });
+    wobblyLine(ctx, Array.from({ length: 12 }, (_, q) => [180 + q * 65 * Math.min(1, p * 1.2), 1515]), 30 + k, 7, '#d9480f');
+    // 手繪箭頭與星星（示意）
+    if (shot.role === 'point' || shot.role === 'intro') { const a = ease((lt - 0.4) / 0.4); if (a > 0) { ctx.save(); ctx.globalAlpha = a; drawArrow(ctx, 860, 1360, 700, 1100, 50 + k, '#d9480f'); ctx.restore(); } }
+    if (shot.role === 'cta') { const a = springy((lt - 0.3) / 0.6); if (a > 0) { drawStar(ctx, 200, 1300, 60 * a, 5, '#f59f00', 0.2); drawStar(ctx, 880, 1300, 48 * a, 5, '#f59f00', -0.3); } }
+    txt(ctx, S, '頁碼', `${k + 1}／${S.n}`, 960, 1720, { size: 34, weight: 800, color: '#4a2f12', lines: 1 });
+  },
+  thermal(ctx, S) {
+    const { t, lt } = S;
+    ctx.save(); ctx.strokeStyle = '#e8fffb'; ctx.lineWidth = 6;
+    [[60, 60, 1, 1], [1020, 60, -1, 1], [60, 1860, 1, -1], [1020, 1860, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y + sy * 90); ctx.lineTo(x, y); ctx.lineTo(x + sx * 90, y); ctx.stroke(); });
+    const pr = 70 + Math.sin(t * 6) * 8; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(540, 820, pr, 0, Math.PI * 2); ctx.stroke();
+    [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dx, dy]) => { ctx.beginPath(); ctx.moveTo(540 + dx * (pr + 10), 820 + dy * (pr + 10)); ctx.lineTo(540 + dx * (pr + 50), 820 + dy * (pr + 50)); ctx.stroke(); });
+    // 右側色階（無數字）
+    const g = ctx.createLinearGradient(0, 300, 0, 1100); THERMAL_STOPS.slice().reverse().forEach(([p, c]) => g.addColorStop(p, c));
+    ctx.fillStyle = g; ctx.fillRect(990, 300, 34, 800); ctx.strokeRect(990, 300, 34, 800); ctx.restore();
+    box(S, '色階', 980, 290, 54, 820);
+    txt(ctx, S, '介面', '熱感應模式', 110, 118, { size: 36, weight: 800, color: '#e8fffb', align: 'left', lines: 1 });
+    if (Math.floor(t * 2) % 2) txt(ctx, S, '介面', '● 偵測中', 970, 118, { size: 36, weight: 800, color: '#ff5d5d', align: 'right', lines: 1 });
+    txt(ctx, S, '大字', S.caption, 540, 1470, { size: 84, weight: 900, color: '#fff', bg: 'rgba(0,0,0,0.6)', maxW: 900, scale: S.pop, alpha: ease(lt / 0.25) });
+    txt(ctx, S, '小字', S.sub, 540, 1630, { size: 44, weight: 700, color: '#ffe08a', bg: 'rgba(0,0,0,0.5)', maxW: 900, lines: 1 });
+  },
+  dating(ctx, S) {
+    const { lt, shot, t } = S;
+    // 上方自創介面（不模仿真實 App）
+    drawHeart(ctx, 120, 112, 70, '#ff3d7f');
+    txt(ctx, S, '介面', '好物配對中', 190, 112, { size: 44, weight: 900, color: '#ff3d7f', align: 'left', lines: 1 });
+    // 卡片底部漸層＋文字
+    const [fx, fy, fw, fh] = STYLES.dating.frame;
+    ctx.save(); rrect(ctx, fx, fy, fw, fh, 44); ctx.clip();
+    const g = ctx.createLinearGradient(0, fy + fh - 420, 0, fy + fh); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.72)'); ctx.fillStyle = g; ctx.fillRect(fx, fy + fh - 420, fw, 420); ctx.restore();
+    txt(ctx, S, '大字', S.caption, fx + 50, fy + fh - 170, { size: 74, weight: 900, color: '#fff', align: 'left', maxW: fw - 100, lines: 1, scale: S.pop });
+    txt(ctx, S, '小字', S.sub, fx + 50, fy + fh - 80, { size: 42, weight: 700, color: '#ffe3ee', align: 'left', maxW: fw - 100, lines: 1 });
+    // 下方按鈕（自繪）
+    const btn = (x, col, icon, s) => { ctx.save(); ctx.translate(x, 1660); ctx.scale(s, s); ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(200,60,110,0.3)'; ctx.shadowBlur = 24; ctx.beginPath(); ctx.arc(0, 0, 80, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+      if (icon === 'x') { ctx.strokeStyle = col; ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-28, -28); ctx.lineTo(28, 28); ctx.moveTo(28, -28); ctx.lineTo(-28, 28); ctx.stroke(); } else drawHeart(ctx, 0, 4, 80, col);
+      ctx.restore(); };
+    const like = shot.role === 'cta' || shot.role === 'point' ? 1 + 0.15 * Math.max(0, Math.sin(Math.min(1, (lt - 0.4) / 0.4) * Math.PI)) : 1;
+    btn(360, '#9aa0a6', 'x', 1); btn(720, '#ff3d7f', 'h', like);
+    box(S, '按鈕', 270, 1570, 540, 180);
+    if (shot.role === 'cta') {
+      const p = springy((lt - 0.2) / 0.6);
+      for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2 + t, rr = 160 + 220 * ease(lt / 1.2); drawHeart(ctx, 540 + Math.cos(a) * rr, 820 + Math.sin(a) * rr, 40 * Math.max(0, p), '#ff7aa8'); }
+      if (p > 0) txt(ctx, S, '配對標語', '配對成功！', 540, 820, { size: 110, weight: 900, color: '#fff', stroke: '#ff3d7f', strokeW: 16, scale: 0.5 + 0.5 * p, lines: 1 });
+    }
+  },
+};
+const THERMAL_STOPS = [[0, '#000010'], [0.22, '#3a0a7a'], [0.45, '#c2185b'], [0.65, '#ff6d00'], [0.85, '#ffd600'], [1, '#ffffff']];
+const THERMAL_LUT = (() => {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 1; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 256, 0); THERMAL_STOPS.forEach(([p, col]) => g.addColorStop(p, col)); x.fillStyle = g; x.fillRect(0, 0, 256, 1);
+  return x.getImageData(0, 0, 256, 1).data;
+})();
+
+/* ========== 算圖 ========== */
+const SHOT_MIN = 2.5, SHOT_MAX = 3.5;
+function buildRender(i, srcEls) {
+  const v = V(i), plan = v.plan, a = v.analysis;
+  const st = STYLES[plan.style] || STYLES.weather;
+  const dur = v.src?.duration || 10;
+  let t = 0;
+  const shots = plan.shots.map((s, k) => {
+    const d = Math.min(SHOT_MAX, Math.max(SHOT_MIN, Number(s.dur) || 3));
+    let start = Math.max(0, Math.min(Number(s.start) || 0, dur - 0.2)), rate = 1;
+    if (start + d > dur) { if (dur >= d) start = dur - d; else { start = 0; rate = Math.max(0.4, dur / d); } }
+    const o = { ...s, k, t0: t, d, srcStart: start, rate };
+    t += d; return o;
+  });
+  const keep = a?.screen?.isRecording ? a.screen.keep : [0, 0, 1000, 1000];
+  const tracks = [
+    ...(a?.blur || []).filter((b) => !v.blurOff.includes(b.id)),
+    ...v.manualBlur.map((m) => ({ id: m.id, label: m.label, boxes: [{ f: 0, box: m.box }], fixed: true })),
+  ];
+  return { i, v, plan, st, shots, total: t, keep, tracks, times: a?.times || [], els: srcEls || [], proc: null };
+}
+// 某個時間點的模糊框（在 AI 有標記的格子之間線性追蹤；超出範圍就沿用最近的位置，確保全程遮住）
+function boxAt(tr, ts, times) {
+  if (tr.fixed) return tr.boxes[0].box;
+  const pts = tr.boxes.map((b) => ({ t: times[b.f] ?? 0, b: b.box })).sort((x, y) => x.t - y.t);
+  if (!pts.length) return null;
+  if (ts <= pts[0].t) return pts[0].b;
+  const last = pts[pts.length - 1]; if (ts >= last.t) return last.b;
+  for (let k = 0; k < pts.length - 1; k++) {
+    if (ts >= pts[k].t && ts <= pts[k + 1].t) { const q = (ts - pts[k].t) / Math.max(0.001, pts[k + 1].t - pts[k].t); return pts[k].b.map((n, m) => lerp(n, pts[k + 1].b[m], q)); }
+  }
+  return last.b;
+}
+function ensureProc(R, el) {
+  const sw = el.videoWidth || 720, sh = el.videoHeight || 1280, sc = Math.min(1, PROC_MAX / Math.max(sw, sh));
+  const pw = Math.round(sw * sc), ph = Math.round(sh * sc);
+  if (!R.proc || R.proc.width !== pw || R.proc.height !== ph) {
+    R.proc = document.createElement('canvas'); R.proc.width = pw; R.proc.height = ph;
+    R.pctx = R.proc.getContext('2d', { willReadFrequently: !!R.st.thermal });
+    R.small = document.createElement('canvas');
+    R.therm = document.createElement('canvas'); R.therm.width = Math.round(pw / 5); R.therm.height = Math.round(ph / 5);
+  }
+}
+// 把實拍畫面畫進處理畫布：調色 → 全程模糊 → （熱感應）
+function processFrame(R, el, ts) {
+  ensureProc(R, el);
+  const { proc, pctx: c, st } = R, pw = proc.width, ph = proc.height;
+  c.save(); if (canFilter && st.filter) c.filter = st.filter; c.drawImage(el, 0, 0, pw, ph); c.restore();
+  if (!canFilter && st.tint) { c.save(); c.globalCompositeOperation = st.tint[2]; c.globalAlpha = st.tint[1]; c.fillStyle = st.tint[0]; c.fillRect(0, 0, pw, ph); c.restore(); }
+  for (const tr of R.tracks) {
+    const b = boxAt(tr, ts, R.times); if (!b) continue;
+    const pad = tr.fixed ? 0 : 0.12;
+    let [y1, x1, y2, x2] = b; const bw = x2 - x1, bh = y2 - y1;
+    x1 -= bw * pad; x2 += bw * pad; y1 -= bh * pad; y2 += bh * pad;
+    const x = Math.max(0, x1 / 1000 * pw), y = Math.max(0, y1 / 1000 * ph), w = Math.min(pw, x2 / 1000 * pw) - x, h = Math.min(ph, y2 / 1000 * ph) - y;
+    if (w < 2 || h < 2) continue;
+    const s = R.small; s.width = Math.max(3, Math.round(w / 16)); s.height = Math.max(3, Math.round(h / 16));
+    const sc = s.getContext('2d'); sc.imageSmoothingEnabled = true; sc.drawImage(proc, x, y, w, h, 0, 0, s.width, s.height);
+    c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'low'; c.drawImage(s, 0, 0, s.width, s.height, x, y, w, h); c.restore();
+  }
+  if (st.thermal) {
+    const tc = R.therm, tx = tc.getContext('2d', { willReadFrequently: true });
+    tx.drawImage(proc, 0, 0, tc.width, tc.height);
+    const im = tx.getImageData(0, 0, tc.width, tc.height), d = im.data;
+    for (let k = 0; k < d.length; k += 4) { const l = Math.min(255, Math.round((d[k] * 0.3 + d[k + 1] * 0.59 + d[k + 2] * 0.11) * 1.1)) * 4; d[k] = THERMAL_LUT[l]; d[k + 1] = THERMAL_LUT[l + 1]; d[k + 2] = THERMAL_LUT[l + 2]; }
+    tx.putImageData(im, 0, 0);
+    c.save(); c.imageSmoothingEnabled = true; c.drawImage(tc, 0, 0, pw, ph); c.restore();
+  }
+}
+// 運鏡：在實拍畫面中取出符合版面比例的範圍，依推近／拉遠／平移移動
+function camera(R, shot, lt, fr) {
+  const pw = R.proc.width, ph = R.proc.height, [ky1, kx1, ky2, kx2] = R.keep;
+  const kx = kx1 / 1000 * pw, ky = ky1 / 1000 * ph, kw = (kx2 - kx1) / 1000 * pw, kh = (ky2 - ky1) / 1000 * ph;
+  const ar = fr[2] / fr[3];
+  let cw, ch; if (kw / kh > ar) { ch = kh; cw = kh * ar; } else { cw = kw; ch = kw / ar; }
+  const q = ease(lt / shot.d);
+  let z = 1.04, ox = 0, oy = 0;
+  switch (shot.move) {
+    case 'push': z = lerp(1, 1.18, q); break;
+    case 'pull': z = lerp(1.18, 1, q); break;
+    case 'panL': z = 1.16; ox = lerp(0.9, -0.9, q); break;
+    case 'panR': z = 1.16; ox = lerp(-0.9, 0.9, q); break;
+    case 'panU': z = 1.16; oy = lerp(0.9, -0.9, q); break;
+    case 'panD': z = 1.16; oy = lerp(-0.9, 0.9, q); break;
+    default: break;
+  }
+  if (shot.fx === 'zoom') z *= 1 + 0.25 * (1 - ease(lt / 0.35));
+  const vw = cw / z, vh = ch / z;
+  let cx = kx + kw / 2 + ox * (cw - vw) / 2, cy = ky + kh / 2 + oy * (ch - vh) / 2;
+  cx = Math.max(kx + vw / 2, Math.min(kx + kw - vw / 2, cx)); cy = Math.max(ky + vh / 2, Math.min(ky + kh - vh / 2, cy));
+  return [cx - vw / 2, cy - vh / 2, vw, vh];
+}
+// 進入第 k 個分鏡時用的轉場（第 0 個沒有）
+function trFor(R, k) {
+  if (k < 1) return '';
+  const s = R.shots[k]; if (s.tr && TRANS[s.tr] && s.tr !== 'auto') return s.tr;
+  const list = STYLE_TRANS[R.plan.style] || STYLE_TRANS.weather;
+  if (s.role === 'intro' || k === 1) return list[0];
+  if (s.role === 'cta' || k === R.shots.length - 1) return list[list.length - 1];
+  return list[1 + ((k - 2) % (list.length - 2))];
+}
+function heartPath(ctx, cx, cy, s) {
+  ctx.moveTo(cx, cy + 0.3 * s); ctx.bezierCurveTo(cx - 0.6 * s, cy - 0.1 * s, cx - 0.4 * s, cy - 0.6 * s, cx, cy - 0.3 * s);
+  ctx.bezierCurveTo(cx + 0.4 * s, cy - 0.6 * s, cx + 0.6 * s, cy - 0.1 * s, cx, cy + 0.3 * s); ctx.closePath();
+}
+// 把「上一個分鏡的最後畫面」依轉場方式疊在新分鏡上，q：0（全是舊畫面）→ 1（全是新畫面）
+function applyTransition(ctx, out, type, q, seed) {
+  const p = ease(q);
+  ctx.save();
+  switch (type) {
+    case 'fade': ctx.globalAlpha = 1 - p; ctx.drawImage(out, 0, 0); break;
+    case 'zoom': { const sc = 1 + 0.45 * p; ctx.globalAlpha = 1 - p; ctx.translate(VW / 2, VH / 2); ctx.scale(sc, sc); ctx.translate(-VW / 2, -VH / 2); ctx.drawImage(out, 0, 0); break; }
+    case 'whip': { const x = -VW * p * 1.1; for (let n = 0; n < 5; n++) { ctx.globalAlpha = (1 - p) * (n === 0 ? 1 : 0.22); ctx.drawImage(out, x - n * 60 * p * 3, 0); } break; }
+    case 'wipe': { const edge = -500 + (VW + 1000) * p; ctx.beginPath(); ctx.moveTo(edge, 0); ctx.lineTo(VW + 600, 0); ctx.lineTo(VW + 600, VH); ctx.lineTo(edge - 500, VH); ctx.closePath(); ctx.clip(); ctx.drawImage(out, 0, 0);
+      ctx.restore(); ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 14; ctx.beginPath(); ctx.moveTo(edge, 0); ctx.lineTo(edge - 500, VH); ctx.stroke(); break; }
+    case 'circle': case 'heart': {
+      const r = 2300 * p; ctx.beginPath(); ctx.rect(0, 0, VW, VH);
+      if (type === 'circle') { ctx.moveTo(VW / 2 + r, VH / 2); ctx.arc(VW / 2, VH / 2, r, 0, Math.PI * 2, true); } else heartPath(ctx, VW / 2, VH / 2, r * 1.4);
+      ctx.clip('evenodd'); ctx.drawImage(out, 0, 0); break; }
+    case 'glitch': {
+      const r = rng(seed + Math.floor(q * 12)); const a = 1 - p;
+      for (let y = 0; y < VH; y += 60) { const h = 30 + r() * 90, dx = (r() - 0.5) * 220 * (0.4 + q); ctx.globalAlpha = a; ctx.drawImage(out, 0, y, VW, h, dx, y, VW, h); }
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.35 * Math.sin(q * Math.PI);
+      ctx.fillStyle = '#ff00aa'; ctx.fillRect(0, r() * VH, VW, 40); ctx.fillStyle = '#00e5ff'; ctx.fillRect(0, r() * VH, VW, 30); break; }
+    case 'flash': default: {
+      if (q < 0.5) { ctx.globalAlpha = 1 - q * 2; ctx.drawImage(out, 0, 0); }
+      ctx.globalAlpha = 0.95 * Math.sin(Math.min(1, q) * Math.PI); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, VW, VH); break; }
+  }
+  ctx.restore();
+}
+// 畫一格完整畫面：分鏡開頭的 TR_DUR 秒內，把上一個分鏡的最後畫面依轉場疊上去
+function drawComposite(ctx, t, R, els) {
+  const idx0 = R.shots.findIndex((s) => t < s.t0 + s.d), idx = idx0 === -1 ? R.shots.length - 1 : idx0;
+  const s = R.shots[idx], lt = t - s.t0;
+  if (idx > 0 && lt >= 0 && lt < TR_DUR) {
+    const prev = R.shots[idx - 1];
+    if (!R.buf) { R.buf = document.createElement('canvas'); R.buf.width = VW; R.buf.height = VH; }
+    drawFrame(R.buf.getContext('2d'), prev.t0 + prev.d - 0.001, R, els ? els[(idx - 1) % 2] : undefined);   // 上一個分鏡的最後畫面
+    drawFrame(ctx, t, R, els ? els[idx % 2] : undefined);
+    applyTransition(ctx, R.buf, trFor(R, idx), lt / TR_DUR, idx * 97);
+  } else drawFrame(ctx, t, R, els ? els[idx % 2] : undefined);
+}
+function drawFrame(ctx, t, R, elFor) {
+  const { st, shots, v } = R;
+  const idx = shots.findIndex((s) => t < s.t0 + s.d), shot = shots[idx === -1 ? shots.length - 1 : idx];
+  const lt = Math.max(0, t - shot.t0);
+  const el = elFor || R.els[shot.k % 2];
+  ctx.save();
+  ctx.fillStyle = st.bg; ctx.fillRect(0, 0, VW, VH);
+  if (st === STYLES.kraft) {   // 牛皮紙紋理
+    const r = rng(3); ctx.fillStyle = 'rgba(90,60,20,0.08)'; for (let q = 0; q < 500; q++) ctx.fillRect(r() * VW, r() * VH, 2 + r() * 3, 2 + r() * 3);
+  }
+  // 震動
+  if (shot.fx === 'shake' && lt < 0.45) { const a = (1 - lt / 0.45) * 16; ctx.translate(Math.sin(lt * 90) * a, Math.cos(lt * 70) * a); }
+  const fr = st.frame || [0, 0, VW, VH];
+  if (el && el.readyState >= 2) {
+    processFrame(R, el, el.currentTime);
+    const [sx, sy, sw, sh] = camera(R, shot, lt, fr);
+    ctx.save();
+    if (st.round) { ctx.shadowColor = 'rgba(200,60,110,0.3)'; ctx.shadowBlur = 40; ctx.fillStyle = '#fff'; rrect(ctx, fr[0], fr[1], fr[2], fr[3], st.round); ctx.fill(); ctx.shadowBlur = 0; rrect(ctx, fr[0], fr[1], fr[2], fr[3], st.round); ctx.clip(); }
+    if (st === STYLES.kraft) { ctx.fillStyle = '#fbf3e2'; ctx.fillRect(fr[0] - 18, fr[1] - 18, fr[2] + 36, fr[3] + 36); }
+    ctx.drawImage(R.proc, sx, sy, sw, sh, fr[0], fr[1], fr[2], fr[3]);
+    ctx.restore();
+  }
+  // 自繪介面、字幕、特效
+  const S = {
+    t, lt, d: shot.d, k: shot.k, n: shots.length, shot, shots, layout: [],
+    caption: shot.role === 'cta' && !shot.caption ? (R.plan.cta || '現在就入手！') : shot.caption,
+    sub: shot.sub, short: (R.i.name || '本商品').slice(0, 10),
+    ticker: (v.desc || R.i.name || '').replace(/\s+/g, ' ').slice(0, 90),
+    pop: shot.fx === 'bounce' ? 0.6 + 0.4 * springy((lt - 0.08) / 0.5) : 1,
+  };
+  STYLE_DRAW[R.plan.style] ? STYLE_DRAW[R.plan.style](ctx, S) : STYLE_DRAW.weather(ctx, S);
+  // 結尾購買引導：統一加上醒目的按鈕字（若字幕本身不是引導語）
+  if (shot.role === 'cta' && R.plan.cta && S.caption !== R.plan.cta) {
+    const p = springy((lt - 0.5) / 0.5);
+    if (p > 0) txt(ctx, S, '購買引導', R.plan.cta, 540, 1260, { size: 68, weight: 900, color: '#fff', bg: '#e8590c', padX: 44, padY: 20, radius: 50, maxW: 900, lines: 1, scale: 0.5 + 0.5 * p });
+  }
+  // 示意動畫與安全提醒（小字）
+  if (shot.demo) txt(ctx, S, '示意註記', DEMO_NOTE, 540, 1862, { size: 28, weight: 600, color: '#fff', bg: 'rgba(0,0,0,0.55)', padX: 16, padY: 6, radius: 10, maxW: 1000, lines: 1 });
+  if (shot.role === 'cta' && R.plan.safety) txt(ctx, S, '安全提醒', `⚠ ${R.plan.safety}`, 540, shot.demo ? 1810 : 1862, { size: 30, weight: 700, color: '#fff', bg: 'rgba(0,0,0,0.6)', padX: 16, padY: 6, radius: 10, maxW: 1000, lines: 1 });
+  ctx.restore();
+  // 轉場特效
+  if (shot.fx === 'flash' && lt < 0.28) { ctx.fillStyle = `rgba(255,255,255,${0.9 * (1 - lt / 0.28)})`; ctx.fillRect(0, 0, VW, VH); }
+  if (shot.fx === 'fade' && shot.k === 0 && lt < 0.35) { ctx.fillStyle = `rgba(0,0,0,${1 - lt / 0.35})`; ctx.fillRect(0, 0, VW, VH); }
+  if (t > R.total - 0.35) { ctx.fillStyle = `rgba(0,0,0,${(t - (R.total - 0.35)) / 0.35})`; ctx.fillRect(0, 0, VW, VH); }
+  return S;
+}
+
+/* ========== 合成配樂與音效（WebAudio，不使用現成音樂） ========== */
+const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+let audioCtx = null;
+const actx = () => (audioCtx ||= new (window.AudioContext || window.webkitAudioContext)());
+function synth(ac, R, out) {
+  const M = R.st.music, T0 = ac.currentTime + 0.3, total = R.total, beat = 60 / M.bpm, s16 = beat / 4;
+  const master = ac.createGain(); master.gain.value = 0.9;
+  const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  master.connect(comp).connect(out);
+  const mus = ac.createGain(); mus.connect(master);
+  mus.gain.setValueAtTime(0.0001, T0); mus.gain.exponentialRampToValueAtTime(0.5, T0 + 0.25);
+  mus.gain.setValueAtTime(0.5, T0 + total - 0.7); mus.gain.linearRampToValueAtTime(0.0001, T0 + total);
+  const fx = ac.createGain(); fx.gain.value = 0.85; fx.connect(master);
+  const nb = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const nd = nb.getChannelData(0); for (let k = 0; k < nd.length; k++) nd[k] = Math.random() * 2 - 1;
+  const end = T0 + total + 0.1;
+  const env = (g, t, a, peak, dec) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + dec); };
+  const osc = (type, f, t, dur, peak, dest, a = 0.005) => { if (t > end) return null; const o = ac.createOscillator(), g = ac.createGain(); o.type = type; o.frequency.setValueAtTime(f, t); env(g, t, a, peak, dur); o.connect(g).connect(dest); o.start(t); o.stop(t + a + dur + 0.05); return o; };
+  const noise = (t, dur, peak, dest, type, f, q = 1) => { if (t > end) return null; const s = ac.createBufferSource(), fl = ac.createBiquadFilter(), g = ac.createGain(); s.buffer = nb; fl.type = type; fl.frequency.setValueAtTime(f, t); fl.Q.value = q; env(g, t, 0.003, peak, dur); s.connect(fl).connect(g).connect(dest); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.05); return fl; };
+  const kick = (t, v = 1) => { const o = osc('sine', 150, t, 0.3, 0.9 * v, mus, 0.002); o?.frequency.exponentialRampToValueAtTime(42, t + 0.12); };
+  const snare = (t, v = 1) => { noise(t, 0.16, 0.45 * v, mus, 'highpass', 1400); osc('triangle', 190, t, 0.08, 0.25 * v, mus, 0.002); };
+  const hat = (t, v = 1, open) => noise(t, open ? 0.16 : 0.04, 0.16 * v, mus, 'highpass', 7500);
+  const clap = (t) => { [0, 0.012, 0.024].forEach((d) => noise(t + d, 0.09, 0.3, mus, 'bandpass', 1500, 1.4)); };
+  const prog = M.minor ? [[0, 3, 7], [8, 12, 15], [3, 7, 10], [10, 14, 17]] : [[0, 4, 7], [7, 11, 14], [9, 12, 16], [5, 9, 12]];
+  const bars = Math.ceil(total / (beat * 4)) + 1;
+  for (let b = 0; b < bars; b++) {
+    const bt = T0 + b * beat * 4, ch = prog[b % 4], root = M.root + ch[0] - 12;
+    // 鼓
+    for (let st = 0; st < 16; st++) {
+      const t = bt + st * s16; if (t > end) break;
+      const onBeat = st % 4 === 0, beatN = st / 4;
+      if (M.drums === '4floor') { if (onBeat) kick(t); if (st === 4 || st === 12) snare(t); if (st % 2 === 0) hat(t, 0.8, st % 4 === 2); }
+      else if (M.drums === 'pop') { if (st === 0 || st === 6 || st === 8) kick(t); if (st === 4 || st === 12) snare(t, 0.8); if (st % 2 === 0) hat(t, 0.6); }
+      else if (M.drums === 'halftime') { if (st === 0 || st === 10) kick(t); if (st === 8) snare(t); if (st % 2 === 0) hat(t, 0.5, st === 14); }
+      else if (M.drums === 'claps') { if (st === 0 || st === 8) kick(t, 0.7); if (st === 4 || st === 12) clap(t); if (st % 4 === 2) hat(t, 0.4); }
+      else if (M.drums === 'trailer') { if (st === 0 && b % 2 === 0) { kick(t, 1.2); noise(t, 1.2, 0.25, mus, 'lowpass', 300); } if (st === 12 && b % 2 === 1) { const f = noise(t - beat * 2, beat * 2.4, 0.18, mus, 'bandpass', 300, 2); f?.frequency.exponentialRampToValueAtTime(5000, t + beat * 0.4); } }
+      void beatN;
+    }
+    // 低音
+    const bw = M.bassWave;
+    if (M.bass === 'roots') { osc(bw, hz(root), bt, beat * 1.6, 0.3, mus); osc(bw, hz(root + 7), bt + beat * 2, beat * 1.6, 0.25, mus); }
+    else if (M.bass === '8ths') for (let q = 0; q < 8; q++) osc(bw, hz(root), bt + q * beat / 2, beat * 0.4, 0.18, mus);
+    else if (M.bass === '16ths') for (let q = 0; q < 16; q++) osc(bw, hz(root + (q % 4 === 3 ? 12 : 0)), bt + q * s16, s16 * 0.8, 0.14, mus);
+    else if (M.bass === 'bounce') for (let q = 0; q < 8; q++) osc(bw, hz(root + (q % 2 ? 12 : 0)), bt + q * beat / 2, beat * 0.3, 0.15, mus);
+    else if (M.bass === 'drone') osc(bw, hz(root - 12), bt, beat * 4, 0.22, mus, 0.4);
+    // 旋律／和弦
+    const notes = ch.map((n) => M.root + n + 12);
+    if (M.lead === 'arp8') for (let q = 0; q < 8; q++) osc(M.leadWave, hz(notes[q % 3] + (q >= 4 ? 12 : 0)), bt + q * beat / 2, beat * 0.45, 0.09, mus);
+    else if (M.lead === 'arp16') for (let q = 0; q < 16; q++) osc(M.leadWave, hz(notes[(q * 2) % 3] + 12), bt + q * s16, s16 * 0.7, 0.05, mus);
+    else if (M.lead === 'pad') notes.forEach((n) => osc(M.leadWave, hz(n), bt, beat * 3.8, 0.045, mus, 0.4));
+    else if (M.lead === 'beep') for (let q = 0; q < 4; q++) osc('sine', hz(notes[0] + 24), bt + q * beat, 0.06, 0.06, mus);
+  }
+  // 環境音
+  if (M.amb) {
+    const s = ac.createBufferSource(); s.buffer = nb; s.loop = true;
+    const fl = ac.createBiquadFilter(), g = ac.createGain();
+    if (M.amb === 'rain') { fl.type = 'highpass'; fl.frequency.value = 2500; g.gain.value = 0.05; }
+    else if (M.amb === 'wind') { fl.type = 'bandpass'; fl.frequency.value = 500; fl.Q.value = 0.6; g.gain.value = 0.05; }
+    else { fl.type = 'lowpass'; fl.frequency.value = 180; g.gain.value = 0.06; }
+    s.connect(fl).connect(g).connect(mus); s.start(T0); s.stop(end);
+  }
+  // 音效：轉場、點擊、叮聲、衝擊
+  const whoosh = (t) => { const f = noise(t, 0.35, 0.35, fx, 'bandpass', 400, 1.2); f?.frequency.exponentialRampToValueAtTime(4500, t + 0.3); };
+  const pop = (t) => { const o = osc('sine', 620, t, 0.07, 0.35, fx, 0.002); o?.frequency.exponentialRampToValueAtTime(980, t + 0.05); };
+  const ding = (t) => { osc('sine', 1318.5, t, 0.9, 0.22, fx); osc('sine', 1975.5, t, 0.6, 0.1, fx); };
+  const impact = (t) => { const o = osc('sine', 90, t, 0.6, 0.8, fx, 0.003); o?.frequency.exponentialRampToValueAtTime(38, t + 0.4); noise(t, 0.25, 0.3, fx, 'lowpass', 900); };
+  const heavy = R.plan.style === 'fighter' || R.plan.style === 'trailer';
+  for (const s of R.shots) {
+    const t = T0 + s.t0;
+    if (s.k > 0) {
+      const tr = trFor(R, s.k);
+      if (tr === 'glitch') { for (let n = 0; n < 4; n++) osc('square', 180 + n * 260, t + n * 0.05, 0.04, 0.12, fx, 0.002); noise(t, 0.25, 0.2, fx, 'highpass', 3000); }
+      else if (tr === 'flash') { impact(t); osc('sine', 2093, t, 0.4, 0.08, fx); }
+      else if (tr === 'heart' || tr === 'circle') { whoosh(t - 0.08); osc('sine', 1568, t + 0.15, 0.5, 0.12, fx); }
+      else if (tr === 'fade') { const f = noise(t - 0.1, 0.6, 0.12, fx, 'lowpass', 600); f?.frequency.exponentialRampToValueAtTime(200, t + 0.5); }
+      else whoosh(t - 0.12);
+    }
+    if (s.caption || s.role === 'cta') pop(t + 0.12);
+    if (s.role === 'point' || s.role === 'cta') ding(t + (heavy ? 0.35 : 0.3));
+    if (s.fx === 'flash' || s.fx === 'shake' || (heavy && (s.role === 'intro' || s.role === 'cta'))) impact(t + 0.02);
+  }
+  return { T0, stop: () => { try { mus.gain.cancelScheduledValues(0); master.disconnect(); } catch { /* 已停止 */ } } };
+}
+
+/* ========== 檢查：版面、文案 ========== */
+const RE_MONEY = /(NT\$|\$\s*\d|\d+\s*(元|塊)|折扣?\s*\d|\d+\s*折|特價|免運)/;
+const RE_DATE = /(\d{2,4}\s*[\/.\-年]\s*\d{1,2}\s*[\/.\-月]\s*\d{1,2}|有效期|保存期限|到期|製造日)/;
+const RE_CLAIM = /(治療|療效|根治|治癒|醫療|保證|第一|唯一|最有效|最好|100\s*%|百分之百|比.{0,6}(更|還)(好|強|有效))/;
+// AI 常自行加上的形容詞：畫面文字有、但提示詞沒寫，就提醒使用者確認
+const PUFF = ['大容量', '超大', '超好用', '好用', '超輕', '輕巧', '超值', '划算', '神器', '必備', '爆款', '熱銷', '人氣', '頂級', '高級', '神級', '超強', '強效', '快速', '耐用', '安全', '健康', '環保', '天然', '無毒', '專業', '最'];
+function copyIssues(text) {
+  const out = [];
+  if (RE_MONEY.test(text)) out.push('疑似金額或優惠字樣（不要放價格）');
+  if (RE_DATE.test(text)) out.push('疑似日期或期限字樣（不要放日期）');
+  if (RE_CLAIM.test(text)) out.push('疑似療效、保證或比較性用語，請確認包裝上確實有寫');
+  const prompt = String(vItem()?.video?.desc || '');
+  const extra = PUFF.filter((w) => text.includes(w) && !prompt.includes(w));
+  if (extra.length) out.push(`提示詞沒有寫到「${extra.join('、')}」，請確認是否正確或刪除`);
+  return out;
+}
+function layoutIssues(S) {
+  const out = [], L = S.layout.filter((r) => r.w > 0);
+  for (const r of L) {
+    if (r.cut) out.push(`「${r.text}」太長，超過可顯示的行數`);
+    if (!r.ui && (r.x < 24 || r.x + r.w > VW - 24 || r.y < 40 || r.y + r.h > VH - 30)) out.push(`「${r.text || r.tag}」超出畫面安全範圍`);
+  }
+  const inter = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+  // 只檢查「文字」之間、或文字壓到別的介面元件；同一組介面本身的文字（例如字幕條上的字）不算
+  const host = { 大字: ['字幕條', '紙卡'], 小字: ['字幕條', '紙卡'], 台標文字: ['台標'], 血條文字: ['血條'], VS: ['血條'], 片頭: ['黑邊'], 介面: [], 跑馬燈: [] };
+  for (let a = 0; a < L.length; a++) for (let b = a + 1; b < L.length; b++) {
+    const A = L[a], B = L[b]; if (A.ui && B.ui) continue;
+    const [T, U] = A.ui ? [B, A] : [A, B];
+    if (U.ui && (host[T.tag] || []).includes(U.tag)) continue;
+    if (!U.ui && T.tag === U.tag) continue;
+    const ov = inter(A, B); if (ov > Math.min(A.w * A.h, B.w * B.h) * 0.08) out.push(`「${T.text || T.tag}」與「${U.text || U.tag}」重疊`);
+  }
+  return [...new Set(out)];
+}
 
 /* ========== 畫面 ========== */
 function renderVideo(force) {
   const ae = document.activeElement;
-  if (!force && ae && ae.closest?.('#vidBody') && ae.matches('input,textarea,select')) { pendingRender = true; return; }   // 同步進來時若正在編輯，等編輯完再重繪
-  const pool = items.filter((i) => i.status !== 'drop').sort((a, b) => (INQ(b) - INQ(a)) || (b.video ? 1 : 0) - (a.video ? 1 : 0) || b.total - a.total);
-  if (vSel && !vItem()) vSel = '';
-  const sel = `<div class="card"><h2>1. 選擇商品</h2>
-    <select id="vItem" aria-label="選擇要做影片的商品"><option value="">— 請選擇商品（發布清單的商品排在前面）—</option>${pool.map((i) => `<option value="${esc(i.id)}"${i.id === vSel ? ' selected' : ''}>${INQ(i) ? '📝 ' : ''}${i.video?.sections?.length ? '🎬 ' : ''}${esc(i.name.slice(0, 60))}</option>`).join('')}</select>
-    <p class="hint">流程：上傳照片 → AI 產生腳本（可修改）→ 產生配音 → 預覽 → 輸出影片。照片、配音與音樂會存在雲端，換裝置也能接著做。</p></div>`;
+  if (!force && ae && ae.closest?.('#vidBody') && ae.matches('input,textarea,select')) { pendingRender = true; return; }
+  // 永遠只有一個目前的專案：沒有就自動建立（專案名稱自動用影片檔名）
+  if (!vItem()) {
+    if (!vProjects.length) vProjects.push(newProject());
+    vSel = vProjects[vProjects.length - 1].id; store.set('vProjSel', vSel); vSaveNow();
+  }
+  const sel = `<div class="card"><h2>1. 影片專案</h2>
+    <p class="hint">把你拍的商品實拍影片剪成 9:16、14–19 秒的特色銷售短影音：依你的提示詞設計風格、分鏡與文案，自動加入轉場，配樂與音效都由程式合成。這是獨立功能，不會使用或修改商品清單；專案與影片只存在這台瀏覽器。</p>
+    <div class="btns"><button type="button" class="pri" data-act="vNewProj">＋ 新增影片專案</button></div></div>`;
   const i = vItem();
-  if (!i) { $('#vidBody').innerHTML = sel + (items.length ? '' : '<p class="empty">還沒有商品，請先到「<a href="#list">商品分析</a>」匯入。</p>'); return; }
-  const v = V(i), id = esc(i.id);
-  const imgOpts = (k) => v.images.map((_, n) => `<option value="${n}"${n === k ? ' selected' : ''}>照片 ${n + 1}</option>`).join('');
-  const total = estTotal(v);
-  $('#vidBody').innerHTML = sel + `
-  <div class="card"><h2>2. 商品照片 <span class="tag">${v.images.length}／${MAX_IMGS}</span></h2>
-    <div class="vimgs" id="vImgs">${v.images.map((im, n) => `<figure><img data-vimg="${esc(im.key)}" alt="照片 ${n + 1}"><figcaption>照片 ${n + 1}</figcaption>
-      <div class="vimg-acts">${n ? `<button type="button" data-act="vImgLeft" data-k="${n}" aria-label="照片 ${n + 1} 往前移">◀</button>` : ''}<button type="button" class="danger" data-act="vImgDel" data-k="${n}" aria-label="刪除照片 ${n + 1}">✕</button></div></figure>`).join('')}</div>
-    ${v.images.length < MAX_IMGS ? `<label class="btn">上傳照片（可多選）<input class="vh" type="file" accept="image/jpeg,image/png,image/webp" multiple data-vf="img"></label>` : ''}
-    <p class="hint">建議 3–6 張：白底產品照、使用中的照片、細節特寫。會自動壓縮到 1080 px。</p><div id="vImgProg" class="vprog-box"></div></div>
+  const v = V(i), plan = v.plan;
+  if (v.src) ensurePrep(v);
+  const a = v.analysis;
+  const blocked = plan?.prohibited?.blocked;
+  const ready = v.src && v.own && (v.desc || '').trim();
+  const dur = plan ? plan.shots.reduce((t, s) => t + Math.min(SHOT_MAX, Math.max(SHOT_MIN, Number(s.dur) || 3)), 0) : 0;
 
-  <div class="card"><h2>3. 腳本</h2>
-    <div class="row2"><label>影片長度（秒）<input type="number" min="15" max="45" step="5" data-vg="seconds" value="${esc(v.seconds)}"></label><span></span></div>
-    <div class="btns"><button type="button" class="pri" data-act="vScript"${v.images.length ? '' : ' disabled'}>${v.sections.length ? 'AI 重新產生腳本' : 'AI 產生腳本'}</button><button type="button" data-act="vAddSec">新增段落</button></div>
-    ${v.images.length ? '' : '<p class="hint">請先上傳照片，AI 會看照片安排每一段畫面。</p>'}
-    <div id="vScriptProg" class="vprog-box"></div><div id="vScriptErr"></div>
-    <div class="vsecs">${v.sections.map((s, k) => `<div class="vsec">
-      <div class="vsec-h"><b>第 ${k + 1} 段</b><span class="muted sm">${v.audio[s.id]?.dur ? `🔊 ${v.audio[s.id].dur.toFixed(1)} 秒` : ''}${s.useClip ? ` ｜🎥 ${clipLabel(v.clips[s.id])}` : ''}</span>
-        <span class="grow"></span>${k ? `<button type="button" data-act="vSecUp" data-k="${k}" aria-label="第 ${k + 1} 段上移">↑</button>` : ''}<button type="button" class="danger" data-act="vSecDel" data-k="${k}" aria-label="刪除第 ${k + 1} 段">✕</button></div>
-      <label>旁白<textarea rows="2" maxlength="80" data-vs="text" data-k="${k}">${esc(s.text)}</textarea></label>
-      <div class="row3"><label>字卡<input maxlength="16" data-vs="card" data-k="${k}" value="${esc(s.card)}"></label>
-        <label>效果<select data-vs="effect" data-k="${k}">${opts(EFFECTS, s.effect)}</select></label>
-        <label>照片<select data-vs="image" data-k="${k}"${s.effect === 'grid' ? ' disabled' : ''}>${imgOpts(s.image)}</select></label></div>
-      ${s.effect === 'mist' || s.effect === 'push' || s.effect === 'shine' ? `<div class="btns"><button type="button" data-act="vPoint" data-k="${k}">${s.point ? '重設' : '設定'}${s.effect === 'mist' ? '噴口位置' : '推近焦點'}</button>${s.effect === 'mist' ? `<label class="inl">噴霧方向<select data-vs="dir" data-k="${k}">${opts(DIRS, String(s.dir ?? 180))}</select></label>` : ''}</div>` : ''}
-      <details><summary class="sm">🎥 AI 動態鏡頭（選用，需 Gemini 付費方案）</summary>
-        <label class="chk"><input type="checkbox" data-vs="useClip" data-k="${k}"${s.useClip ? ' checked' : ''}> 這一段改用 AI 生成的第一人稱動態影片</label>
-        <label>英文提示詞<textarea rows="3" maxlength="1200" data-vs="motion" data-k="${k}">${esc(s.motion)}</textarea></label></details>
-    </div>`).join('')}</div>
-    ${v.sections.length ? `<div class="row2"><label>收尾大字<input maxlength="20" data-vg="endTitle" value="${esc(v.endTitle)}"></label><label>收尾小字<input maxlength="24" data-vg="endSub" value="${esc(v.endSub)}"></label></div>
-    <p class="hint">預估長度約 ${total.toFixed(0)} 秒（產生配音後會依實際語音長度調整）。</p>` : ''}
-  </div>
+  const srcCard = `<div class="card"><h2>2. 上傳商品實拍影片</h2>
+    ${v.src ? `<p>🎞 ${esc(v.src.name)}｜${f1(v.src.duration)} 秒｜${v.src.w}×${v.src.h}｜${(v.src.size / 1048576).toFixed(1)} MB <span id="vSrcState" class="muted sm"></span></p><div class="vsrc"><video id="vSrcPrev" controls playsinline muted></video></div><p class="hint">🔇 原始影片的聲音已自動靜音，輸出只使用程式合成的配樂與音效。</p>` : ''}
+    <label class="btn${v.src ? '' : ' pri'}">${v.src ? '更換影片' : '選擇影片檔（MP4／MOV）'}<input class="vh" type="file" accept="video/*" data-vf="src"></label>
+    <p class="hint">影片只存在這台裝置的瀏覽器，不會上傳，也不會傳給 AI。</p>
+    <label class="chk"><input type="checkbox" data-vg="own"${v.own ? ' checked' : ''}> 這支影片是我自己拍攝的，或已取得授權</label>
+    <div id="vSrcProg" class="vprog-box"></div></div>`;
 
-  <div class="card"><h2>4. 配音與背景音樂</h2>
-    <label class="chk"><input type="checkbox" data-vg="voiceOn"${v.voice.on ? ' checked' : ''}> AI 旁白配音（Gemini TTS）</label>
-    <div class="row2"><label>聲音<select data-vg="voiceName">${opts(VOICES, v.voice.name)}</select></label><label>語氣指示<input maxlength="200" data-vg="voiceStyle" value="${esc(v.voice.style)}"></label></div>
-    <div class="btns"><button type="button" class="pri" data-act="vTts"${v.sections.length && v.voice.on ? '' : ' disabled'}>產生配音</button><button type="button" data-act="vTtsTest"${v.sections.length ? '' : ' disabled'}>試聽第一句</button></div>
-    <div id="vTtsProg" class="vprog-box"></div><div id="vTtsErr"></div>
-    <h3>背景音樂</h3>
-    ${v.music ? `<p>🎵 ${esc(v.music.name)} <button type="button" class="ghost" data-act="vMusicDel">移除</button></p>` : '<p class="hint">選填。請使用你有權使用的音樂（例如 YouTube 音訊庫、Pixabay 免費音樂），上限 5 MB。</p>'}
-    <label class="btn">${v.music ? '更換音樂' : '上傳音樂（mp3／m4a／wav）'}<input class="vh" type="file" accept="audio/*" data-vf="music"></label>
-    <label>音樂音量 <input type="range" min="0" max="0.4" step="0.01" data-vg="musicVol" value="${esc(v.musicVol)}"></label>
-    <div id="vMusicProg" class="vprog-box"></div>
-  </div>
+  const pCard = !v.src ? '' : `<div class="card"><h2>3. 提示詞與分鏡</h2>
+    <label>提示詞（AI 會分析這段文字來設計風格、分鏡與文案）<textarea rows="5" maxlength="1500" data-vg="desc" placeholder="例如：ecoco 意可可 噴油壺 250ml，高硼硅玻璃瓶身，按壓就噴出細霧，不滴油不掛油，可裝橄欖油、醬油、醋。想要輕鬆有趣的感覺。">${esc(v.desc || '')}</textarea></label>
+    <div class="row2"><label>風格<select data-vg="style">${opts(STYLE_OPTS, v.style)}</select></label><label>影片長度（14–19 秒）<input type="number" min="14" max="19" step="1" data-vg="seconds" value="${esc(v.seconds)}"></label></div>
+    <div class="btns"><button type="button" class="pri" data-act="vPlan" id="vPlanBtn"${ready ? '' : ' disabled'}>${plan ? 'AI 重新設計分鏡' : 'AI 設計分鏡'}</button>${plan ? '<button type="button" data-act="vAddShot">新增分鏡</button>' : ''}</div>
+    ${!v.own ? '<p class="hint warn">請先勾選上方的素材授權確認。</p>' : ''}
+    <div id="vPlanProg" class="vprog-box"></div><div id="vPlanErr"></div>
+    ${blocked ? `<div class="valert bad">⛔ 依台灣法規，這類商品不能製作廣告影片：${esc(plan.prohibited.reason)}</div>` : ''}
+    ${plan ? planHtml(v, plan, dur) : ''}</div>`;
 
-  <div class="card"><h2>5. AI 動態鏡頭（選用）</h2>
-    <p class="hint">在腳本段落展開「🎥 AI 動態鏡頭」並勾選，就會用 Gemini Omni 生成真正的第一人稱動態影片取代照片動畫（每段約 3–10 秒，費用約 US$1 以內，生成約 2–4 分鐘）。需要 Gemini 付費方案；免費方案會顯示額度為 0。</p>
-    <div class="btns"><button type="button" data-act="vOmni"${v.sections.some((s) => s.useClip) ? '' : ' disabled'}>生成勾選段落的動態鏡頭（${v.sections.filter((s) => s.useClip).length}）</button></div>
-    <div id="vOmniProg" class="vprog-box"></div><div id="vOmniList"></div>
-  </div>
+  const bCard = !v.src ? '' : `<div class="card"><h2>4. 遮蔽（選用）</h2>
+    <p class="hint">如果畫面裡有價格標籤、日期／有效期限、促銷吊牌、別家商品或卡通角色，請在畫面上框起來，輸出時會全程模糊。</p>
+    <div class="vframes" id="vFrames">${(a?.times || []).map((t, k) => `<figure><canvas data-fr="${k}" width="160" height="284"></canvas><figcaption>${f1(t)} 秒</figcaption></figure>`).join('')}</div>
+    <ul class="vblur">${v.manualBlur.map((m, k) => `<li><span>🟧 ${esc(m.label)}（全程固定位置）</span> <button type="button" class="ghost" data-act="vBlurDel" data-k="${k}">刪除</button></li>`).join('') || '<li class="muted">目前沒有模糊框。</li>'}</ul>
+    <div class="btns"><button type="button" data-act="vBlurAdd">＋ 加模糊框</button></div></div>`;
 
-  <div class="card"><h2>6. 預覽與輸出</h2>
+  const kCard = !plan ? '' : `<div class="card"><h2>5. 關鍵畫面檢查</h2>
+    <p class="hint">先輸出每個分鏡的關鍵畫面，檢查文字重疊、超出範圍與模糊有沒有遮到；確認沒問題才能輸出完整影片。</p>
+    <div class="btns"><button type="button" class="pri" data-act="vKeys"${blocked ? ' disabled' : ''}>產生關鍵畫面</button></div>
+    <div id="vKeyProg" class="vprog-box"></div><div id="vKeys" class="vkeys"></div>
+    <div class="btns"><button type="button" data-act="vKeysOk" id="vKeysOk"${v.checked ? '' : ' hidden'} disabled>✓ 已確認</button></div></div>`;
+
+  const oCard = !plan ? '' : `<div class="card"><h2>6. 預覽與輸出</h2>
     <div class="vstage"><canvas id="vCanvas" width="${VW}" height="${VH}" aria-label="影片預覽"></canvas></div>
-    <div class="btns"><button type="button" data-act="vPlay"${v.sections.length ? '' : ' disabled'}>▶ 預覽</button><button type="button" class="ghost" data-act="vStop">■ 停止</button><button type="button" class="pri" data-act="vRender"${v.sections.length ? '' : ' disabled'}>輸出影片</button></div>
-    <p class="hint">輸出是即時錄製：影片多長就要錄多久，錄製時請停留在這個分頁。Chrome／Edge 會輸出 MP4；其他瀏覽器可能是 WebM，上傳前可再轉檔。</p>
+    <div class="btns"><button type="button" data-act="vPlay"${blocked ? ' disabled' : ''}>▶ 預覽</button><button type="button" class="ghost" data-act="vStop">■ 停止</button><button type="button" class="pri" data-act="vRender"${v.checked && !blocked ? '' : ' disabled'}>輸出 MP4</button></div>
+    ${v.checked ? '' : '<p class="hint warn">請先完成「5. 關鍵畫面檢查」並確認版面。</p>'}
+    <p class="hint">輸出 1080×1920、30fps。輸出是即時錄製，影片多長就要錄多久，錄製時請停留在這個分頁；第一次輸出會先暖機約 4 秒。</p>
     <div id="vRenderProg" class="vprog-box"></div><div id="vOut"></div>
-  </div>`;
-  // 照片縮圖
-  $$('#vImgs img[data-vimg]').forEach(async (im) => { try { im.src = await mUrl(im.dataset.vimg); } catch { im.alt = '讀取失敗'; } });
-  drawStill(i);
-  omniResume(i);
-}
-const clipLabel = (c) => (!c ? '尚未生成' : c.state === 'done' ? '已完成' : c.state === 'error' ? '失敗' : '生成中');
-function estTotal(v) { return v.sections.reduce((t, s) => t + secDur(v, s), 0); }
-function secDur(v, s) {
-  const a = v.voice.on && v.audio[s.id]?.dur ? v.audio[s.id].dur : String(s.text || '').length / 4.4;
-  return Math.max(2.6, a + 0.8) + (s.effect === 'pack' ? 0.8 : 0);
-}
+    <h3>交付說明</h3><div class="pre vreport" id="vReport">${esc(reportText(i, v))}</div>
+    <div class="btns"><button type="button" data-act="vCopyReport">複製交付說明</button></div></div>`;
 
-/* ========== AI 腳本 ========== */
-async function genScript(btn) {
-  const i = vItem(); if (!i || vBusy) return; const v = V(i);
-  if (!v.images.length) { toast('請先上傳照片'); return; }
-  if (v.sections.length && !confirm('重新產生會取代目前的腳本，確定？')) return;
-  vBusy = 'script'; btn.disabled = true;
-  const t0 = Date.now(), tick = setInterval(() => { const e = (Date.now() - t0) / 1000; vProg('vScriptProg', Math.min(0.92, 0.15 + e / 25), `AI 正在看照片寫腳本…已經過 ${secs(e)}（約需 10–25 秒）`); }, 500);
-  $('#vScriptErr').innerHTML = '';
-  try {
-    vProg('vScriptProg', 0.05, '準備照片縮圖…');
-    const imgs = [];
-    for (const im of v.images.slice(0, 6)) imgs.push({ mime: 'image/jpeg', data: await b64(await shrink(await mGet(im.key), 512, 0.72)) });
-    const j = await ai('video_script', { name: i.name, category: i.category, price: num(i.price), imageCount: v.images.length, seconds: v.seconds, images: imgs });
-    const o = j.json;
-    if (!o || !Array.isArray(o.sections) || !o.sections.length) throw new Error('AI 沒有回傳可用的腳本，請重試');
-    const n = v.images.length;
-    v.sections = o.sections.slice(0, 8).map((x) => ({
-      id: uid(), text: aiTxt(x.text).slice(0, 80), card: aiTxt(x.card).slice(0, 16),
-      effect: EFFECTS[x.effect] ? x.effect : 'push', image: Math.min(n - 1, Math.max(0, Math.round(num(x.image)))),
-      motion: aiTxt(x.motion).slice(0, 1200), useClip: false,
-    }));
-    if (v.sections[v.sections.length - 1].effect !== 'pack') v.sections[v.sections.length - 1].effect = 'pack';
-    v.endTitle = aiTxt(o.endTitle).slice(0, 20) || i.name.slice(0, 14);
-    v.endSub = aiTxt(o.endSub).slice(0, 24);
-    v.title = aiTxt(o.title).slice(0, 30);
-    v.audio = {};
-    save.i();
-    vProg('vScriptProg', 1, `✓ 腳本完成（${v.sections.length} 段，模型 ${j.model}）`);
-    renderVideo(true);
-    vProg('vScriptProg', 1, `✓ 腳本完成（${v.sections.length} 段），可以直接修改文字、效果與照片`);
-  } catch (e) { vProg('vScriptProg', null); showErr($('#vScriptErr'), e); }
-  finally { clearInterval(tick); vBusy = ''; btn.disabled = false; }
+  $('#vidBody').innerHTML = sel + srcCard + pCard + bCard + kCard + oCard;
+  if (v.src) srcURL(i).then((u) => { const p = $('#vSrcPrev'), s = $('#vSrcState'); if (u && p) { forceMute(p); p.src = u; } else if (s) s.textContent = '（這台裝置上沒有這支影片，請按「更換影片」重新選擇同一支影片）'; });
+  if (a) drawBlurThumbs(i, v);
+  if (plan) drawStill(i);
 }
-
-/* ========== 配音 ========== */
-const ttsKey = (i, s, v) => `vo_${vsafe(i.id)}_${vsafe(s.id)}_${hashStr(`${s.text}|${v.voice.name}|${v.voice.style}`)}`;
-async function ttsOne(text, v) {
-  const r = await fetch('/api/tts', { method: 'POST', headers: mHead('application/json'), body: JSON.stringify({ text, voice: v.voice.name, style: v.voice.style }) });
-  if (!r.ok) await mFail(r);
-  return r.blob();
+// 不分析影片：只在本機準備遮蔽用的畫面時間點，分鏡與文案完全依使用者的提示詞
+function ensurePrep(v) {
+  if (v.analysis?.times?.length && v.analysis.prepFor === v.src.at) return;
+  v.analysis = { prepFor: v.src.at, times: frameTimes(v.src.duration, N_FRAMES), blur: [], screen: { isRecording: false, keep: [0, 0, 1000, 1000] } };
 }
-let audioCtx = null;
-const actx = () => (audioCtx ||= new (window.AudioContext || window.webkitAudioContext)());
-const decode = async (blob) => actx().decodeAudioData(await blob.arrayBuffer());
-async function genTts(btn) {
-  const i = vItem(); if (!i || vBusy) return; const v = V(i);
-  const list = v.sections.filter((s) => s.text.trim());
-  if (!list.length) { toast('沒有旁白文字'); return; }
-  vBusy = 'tts'; btn.disabled = true; $('#vTtsErr').innerHTML = '';
-  let done = 0, made = 0;
-  try {
-    for (const s of list) {
-      const key = ttsKey(i, s, v);
-      vProg('vTtsProg', done / list.length, `配音中 ${done + 1}／${list.length}：「${s.text.slice(0, 18)}」`);
-      if (v.audio[s.id]?.key !== key) {
-        const blob = await ttsOne(s.text, v);
-        await mPut(key, blob);
-        const buf = await decode(blob);
-        if (v.audio[s.id]?.key) mDel(v.audio[s.id].key);
-        v.audio[s.id] = { key, dur: Math.round(buf.duration * 100) / 100 };
-        made++; save.i();
-      }
-      done++;
+function planHtml(v, plan, dur) {
+  const st = STYLES[plan.style];
+  return `<div class="valert ok">🎨 風格：<b>${esc(st?.name || plan.style)}</b>｜${esc(plan.styleReason || '')}<br>📖 劇情：${esc(plan.story || '')}</div>
+    <p class="${dur < 14 || dur > 19 ? 'warn' : 'hint'}">總長 ${f1(dur)} 秒（需 14–19 秒）｜${plan.shots.length} 個分鏡（需 5–6 個）</p>
+    <label>結尾購買引導<input maxlength="16" data-vg="cta" value="${esc(plan.cta || '')}"></label>
+    <label>Reels 推薦標註關鍵字（5 個，空白分隔，可修改）<input maxlength="200" data-vg="tags" value="${esc((plan.hashtags || []).join(' '))}"></label>
+    <div class="btns"><button type="button" data-act="vCopyTags"${(plan.hashtags || []).length ? '' : ' disabled'}>複製 5 個關鍵字</button></div>
+    <div class="vsecs">${plan.shots.map((s, k) => `<div class="vsec">
+      <div class="vsec-h"><b>分鏡 ${k + 1}</b><select data-vs="role" data-k="${k}" aria-label="分鏡 ${k + 1} 角色">${opts(ROLES, s.role)}</select><span class="grow"></span>${k ? `<button type="button" data-act="vShotUp" data-k="${k}" aria-label="分鏡 ${k + 1} 上移">↑</button>` : ''}<button type="button" class="danger" data-act="vShotDel" data-k="${k}" aria-label="刪除分鏡 ${k + 1}">✕</button></div>
+      <div class="row2"><label>大字<input maxlength="16" data-vs="caption" data-k="${k}" value="${esc(s.caption)}"></label><label>小字<input maxlength="22" data-vs="sub" data-k="${k}" value="${esc(s.sub)}"></label></div>
+      <div class="row3"><label>素材起點（秒）<input type="number" min="0" max="${esc(f1(v.src?.duration || 0))}" step="0.1" data-vs="start" data-k="${k}" value="${esc(f1(s.start))}"></label>
+        <label>長度（秒）<input type="number" min="2.5" max="3.5" step="0.1" data-vs="dur" data-k="${k}" value="${esc(f1(s.dur))}"></label>
+        <label>運鏡<select data-vs="move" data-k="${k}">${opts(MOVES, s.move)}</select></label></div>
+      <div class="row3"><label>特效<select data-vs="fx" data-k="${k}">${opts(FXS, s.fx)}</select></label>${k ? `<label>進場轉場<select data-vs="tr" data-k="${k}">${opts(TRANS, s.tr || 'auto')}</select></label>` : '<span></span>'}<label class="chk"><input type="checkbox" data-vs="demo" data-k="${k}"${s.demo ? ' checked' : ''}> 示意動畫（自動加註記小字）</label></div>
+      <p class="sm muted">文案依據：${esc(s.source || '—')}</p>
+      ${[...copyIssues(`${s.caption} ${s.sub}`)].map((x) => `<p class="sm warn">⚠ ${esc(x)}</p>`).join('')}
+    </div>`).join('')}</div>`;
+}
+function drawBlurThumbs(i, v) {
+  const a = v.analysis, cv = $$('#vFrames canvas'); if (!cv.length) return;
+  const paint = (list) => cv.forEach((c) => {
+    const k = +c.dataset.fr, fr = list[k]; const x = c.getContext('2d');
+    x.fillStyle = '#222'; x.fillRect(0, 0, c.width, c.height);
+    if (!fr) { x.fillStyle = '#999'; x.font = `14px ${VFONT}`; x.textAlign = 'center'; x.fillText('讀取中…', c.width / 2, c.height / 2); return; }
+    const im = fr.canvas, sc = Math.min(c.width / im.width, c.height / im.height), w = im.width * sc, h = im.height * sc, ox = (c.width - w) / 2, oy = (c.height - h) / 2;
+    x.drawImage(im, ox, oy, w, h);
+    const R = { times: a.times };
+    for (const b of a.blur || []) {
+      const on = !v.blurOff.includes(b.id), bx = boxAt({ boxes: b.boxes }, a.times[k], R.times); if (!bx) continue;
+      x.save(); x.strokeStyle = on ? '#ff3b30' : '#bbb'; x.lineWidth = 2; if (!on) x.setLineDash([4, 3]);
+      x.strokeRect(ox + bx[1] / 1000 * w, oy + bx[0] / 1000 * h, (bx[3] - bx[1]) / 1000 * w, (bx[2] - bx[0]) / 1000 * h); x.restore();
     }
-    vProg('vTtsProg', 1, `✓ 配音完成：新產生 ${made} 句，沿用 ${done - made} 句（文字沒改的句子不會重新產生）`);
-    const y = window.scrollY; renderVideo(true); window.scrollTo(0, y);
-    vProg('vTtsProg', 1, `✓ 配音完成：新產生 ${made} 句，沿用 ${done - made} 句`);
-  } catch (e) { vProg('vTtsProg', done / list.length, `已完成 ${done}／${list.length} 句後中斷`); showErr($('#vTtsErr'), e); }
+    for (const m of v.manualBlur) { x.save(); x.strokeStyle = '#ff9500'; x.lineWidth = 2; x.strokeRect(ox + m.box[1] / 1000 * w, oy + m.box[0] / 1000 * h, (m.box[3] - m.box[1]) / 1000 * w, (m.box[2] - m.box[0]) / 1000 * h); x.restore(); }
+    if (a.screen?.isRecording) { const kp = a.screen.keep; x.save(); x.strokeStyle = '#34c759'; x.setLineDash([6, 4]); x.lineWidth = 2; x.strokeRect(ox + kp[1] / 1000 * w, oy + kp[0] / 1000 * h, (kp[3] - kp[1]) / 1000 * w, (kp[2] - kp[0]) / 1000 * h); x.restore(); }
+  });
+  if (thumbCache.id === i.id && thumbCache.list.length) paint(thumbCache.list);
+  else { paint([]); grabFrames(i, a.times).then(paint).catch(() => {}); }
+}
+
+/* ========== AI：分析與分鏡 ========== */
+function tick(id, from, to, est, label) {
+  const t0 = Date.now();
+  const h = setInterval(() => { const e = (Date.now() - t0) / 1000; vProg(id, Math.min(to, from + (to - from) * e / est), `${label}…已經過 ${secs(e)}（約需 ${est} 秒）`); }, 400);
+  return () => clearInterval(h);
+}
+async function runPlan(btn) {
+  const i = vItem(); if (!i || vBusy) return; const v = V(i);
+  if (!(v.desc || '').trim()) { toast('請先輸入提示詞'); return; }
+  if (v.plan && !confirm('重新設計會取代目前的分鏡，確定？')) return;
+  vBusy = 'plan'; btn.disabled = true; $('#vPlanErr').innerHTML = '';
+  let stop = tick('vPlanProg', 0.05, 0.95, 15, 'AI 正在挑選風格、設計分鏡');
+  try {
+    const payload = { prompt: (v.desc || '').slice(0, 1500), name: i.name === '未命名影片' ? '' : i.name, seconds: v.seconds, style: v.style, duration: v.src?.duration || 0 };
+    // Google 忙碌（high demand／overloaded）或逾時時自動重試，等待時間逐次拉長
+    const WAITS = [5, 10, 15, 20];
+    let j;
+    for (let n = 0; ; n++) {
+      try {
+        j = await ai('video_plan', payload);
+        if (!j.json || !Array.isArray(j.json.shots) || !j.json.shots.length) throw Object.assign(new Error('AI 回傳的分鏡格式不完整'), { status: 502, badJson: true });
+        break;
+      } catch (e) {
+        const busy = e.badJson || ([502, 503, 504].includes(e.status) && /high demand|overload|unavailable|逾時|太慢|無法連線|Gemini 錯誤/i.test(e.message || ''));
+        if (!busy || n >= WAITS.length) throw e;
+        stop();
+        for (let w = WAITS[n]; w > 0; w--) { vProg('vPlanProg', -1, `Google 目前忙碌中，${w} 秒後自動重試（第 ${n + 1}／${WAITS.length} 次）…`); await new Promise((r) => setTimeout(r, 1000)); }
+        stop = tick('vPlanProg', 0.05, 0.95, 15, `AI 正在挑選風格、設計分鏡（重試第 ${n + 1} 次）`);
+      }
+    }
+    stop();
+    const o = j.json; if (!o || !Array.isArray(o.shots) || !o.shots.length) throw new Error('AI 沒有回傳可用的分鏡，請重試');
+    v.plan = normPlan(o, v); v.checked = false;
+    vSaveNow(); renderVideo(true);
+    vProg('vPlanProg', 1, `✓ 分鏡完成：${STYLES[v.plan.style].name}、${v.plan.shots.length} 個分鏡`);
+  } catch (e) { stop(); vProg('vPlanProg', null); showErr($('#vPlanErr'), e); }
   finally { vBusy = ''; btn.disabled = false; }
 }
-async function ttsTest(btn) {
-  const i = vItem(); if (!i) return; const v = V(i), s = v.sections[0]; if (!s) return;
-  btn.disabled = true; vProg('vTtsProg', -1, '產生試聽中…');
-  try {
-    const key = ttsKey(i, s, v);
-    const blob = v.audio[s.id]?.key === key ? await mGet(key) : await ttsOne(s.text, v);
-    const src = actx().createBufferSource(); src.buffer = await decode(blob); src.connect(actx().destination); await actx().resume(); src.start();
-    vProg('vTtsProg', 1, '▶ 試聽中');
-  } catch (e) { vProg('vTtsProg', null); showErr($('#vTtsErr'), e); }
-  finally { btn.disabled = false; }
+// AI 偶爾會把「情境描述」「文案依據」這類說明文字放進畫面文字，這裡擋掉
+const cleanCopy = (x) => { const t = aiTxt(x).trim(); return /^(情境描述|文案依據|無|N\/A|—|-)/i.test(t) ? '' : t; };
+function normPlan(o, v) {
+  const style = STYLES[o.style] ? o.style : (STYLES[v.style] ? v.style : 'weather');
+  let shots = o.shots.slice(0, 6).map((s) => ({
+    role: ROLES[s?.role] ? s.role : 'point', caption: cleanCopy(s?.caption).slice(0, 16), sub: cleanCopy(s?.sub).slice(0, 22),
+    start: Math.max(0, Number(s?.start) || 0), dur: 3, move: MOVES[s?.move] ? s.move : 'push', fx: FXS[s?.fx] ? s.fx : 'bounce',
+    demo: !!s?.demo, source: aiTxt(s?.source).slice(0, 80),
+  }));
+  while (shots.length < 5) shots.push({ role: 'point', caption: '', sub: '', start: 0, dur: 3, move: 'push', fx: 'bounce', demo: false, source: '' });
+  shots[0].role = 'hook'; shots[shots.length - 1].role = 'cta';
+  // 依目標長度平均分配（每個 2.5–3.5 秒）
+  const each = Math.min(SHOT_MAX, Math.max(SHOT_MIN, v.seconds / shots.length));
+  shots = shots.map((s) => ({ ...s, dur: Math.round(each * 10) / 10 }));
+  const tags = [...new Set((Array.isArray(o.hashtags) ? o.hashtags : []).map((x) => `#${aiTxt(x).replace(/^#+/, '').replace(/[\s#,，、]+/g, '')}`).filter((x) => x.length > 1))].slice(0, 5);
+  return { style, styleReason: aiTxt(o.styleReason).slice(0, 60), story: aiTxt(o.story).slice(0, 80), cta: aiTxt(o.cta).slice(0, 16) || '現在就入手！', hashtags: tags, shots,
+    safety: aiTxt(o.safety).slice(0, 30), prohibited: { blocked: !!o.prohibited?.blocked, reason: aiTxt(o.prohibited?.reason).slice(0, 200) } };
 }
 
-/* ========== AI 動態鏡頭（Gemini Omni，背景函式） ========== */
-const omniPolls = new Map();
-async function genOmni(btn) {
+/* ========== 關鍵畫面檢查 ========== */
+async function runKeys(btn) {
   const i = vItem(); if (!i || vBusy) return; const v = V(i);
-  const list = v.sections.filter((s) => s.useClip);
-  if (!list.length) return;
-  if (list.some((s) => !s.motion.trim())) { toast('勾選的段落需要英文提示詞'); return; }
-  if (!confirm(`將用 Gemini Omni 生成 ${list.length} 段動態影片，每段費用約 US$1 以內（依你的 Google 帳單計費）。確定？`)) return;
-  btn.disabled = true;
+  vBusy = 'keys'; btn.disabled = true; const out = $('#vKeys'); out.innerHTML = '';
   try {
-    for (const s of list) {
-      const img = v.images[s.image] || v.images[0];
-      const keys = [...new Set([img?.key, v.images[0]?.key].filter(Boolean))];
-      const prompt = `${keys.length ? 'Reference: <IMAGE_REF_0> is the exact product — keep its shape, colors, logo and proportions identical throughout. ' : ''}${s.motion.trim()} Vertical 9:16 framing. Single continuous shot. No on-screen text. No dialogue, no voice-over.`;
-      const jobId = `${vsafe(i.id)}_${vsafe(s.id)}_${Date.now().toString(36)}`;
-      const r = await fetch('/.netlify/functions/omni-background', { method: 'POST', headers: mHead('application/json'), body: JSON.stringify({ jobId, prompt, imageKeys: keys }) });
-      if (!r.ok && r.status !== 202) throw new Error(`無法啟動生成（HTTP ${r.status}）`);
-      if (v.clips[s.id]?.key) mDel(v.clips[s.id].key);
-      v.clips[s.id] = { jobId, state: 'running', at: Date.now() };
+    const url = await srcURL(i); if (!url) throw new Error('這台裝置上沒有這支影片，請在「2.」重新選擇同一支影片');
+    const el = mkVideo(url); await vidReady(el);
+    const R = buildRender(i, []), c = document.createElement('canvas'); c.width = VW; c.height = VH; const ctx = c.getContext('2d');
+    const res = [];
+    for (const s of R.shots) {
+      vProg('vKeyProg', s.k / R.shots.length, `產生關鍵畫面 ${s.k + 1}／${R.shots.length}`);
+      const lt = Math.min(s.d - 0.25, 1.4);
+      await seekTo(el, s.srcStart + lt * s.rate);
+      const S = drawFrame(ctx, s.t0 + lt, R, el);
+      const issues = [...layoutIssues(S), ...copyIssues(`${S.caption} ${S.sub}`)];
+      const active = R.tracks.filter((tr) => boxAt(tr, el.currentTime, R.times)).map((tr) => tr.label);
+      const th = document.createElement('canvas'); th.width = 270; th.height = 480; th.getContext('2d').drawImage(c, 0, 0, 270, 480);
+      res.push({ s, url: th.toDataURL('image/jpeg', 0.82), issues, active });
     }
-    save.i(); omniResume(i);
-  } catch (e) { toast(e.message); }
-  finally { btn.disabled = false; }
-}
-function omniResume(i) {
-  const v = V(i);
-  const live = v.sections.filter((s) => s.useClip && v.clips[s.id]);
-  if (!live.length) { vProg('vOmniProg', null); const l = $('#vOmniList'); if (l) l.innerHTML = ''; return; }
-  const draw = () => {
-    const l = $('#vOmniList'); if (!l || vItem() !== i) return;
-    const now = Date.now();
-    const ps = live.map((s) => { const c = v.clips[s.id]; return c.state === 'done' || c.state === 'error' ? 1 : Math.min(0.95, (now - c.at) / 1000 / OMNI_EST); });
-    const run = live.filter((s) => v.clips[s.id].state === 'running').length;
-    vProg('vOmniProg', ps.reduce((a, b) => a + b, 0) / ps.length, run ? `生成中 ${live.length - run}／${live.length} 完成（每段約 2–4 分鐘，可以先做其他事）` : `完成 ${live.filter((s) => v.clips[s.id].state === 'done').length}／${live.length}`);
-    l.innerHTML = `<ol class="batch-list">${live.map((s) => { const c = v.clips[s.id], k = v.sections.indexOf(s) + 1;
-      return `<li><span>第 ${k} 段</span><span class="${c.state === 'done' ? 'pubok' : c.state === 'error' ? 'danger' : 'muted'}">${c.state === 'done' ? '✓ 完成' : c.state === 'error' ? `✕ ${esc(c.error || '失敗')}` : `生成中…${secs((now - c.at) / 1000)}`}</span></li>`; }).join('')}</ol>`;
-  };
-  draw();
-  for (const s of live) {
-    const c = v.clips[s.id];
-    if (c.state !== 'running' || omniPolls.has(c.jobId)) continue;
-    const t = setInterval(async () => {
-      try {
-        const st = JSON.parse(await (await mGet(`omnijob_${c.jobId}`, true)).text());
-        if (st.state === 'done') { c.state = 'done'; c.key = st.videoKey; }
-        else if (st.state === 'error') { c.state = 'error'; c.error = st.error; }
-      } catch (e) { if (e.status !== 404) { c.state = 'error'; c.error = e.message; } else if (Date.now() - c.at > 16 * 60e3) { c.state = 'error'; c.error = '逾時沒有回應'; } }
-      if (c.state !== 'running') { clearInterval(t); omniPolls.delete(c.jobId); save.i(); }
-      draw();
-    }, 8000);
-    omniPolls.set(c.jobId, t);
-  }
-  clearInterval(omniResume.t); omniResume.t = setInterval(() => { if (location.hash !== '#video') return clearInterval(omniResume.t); draw(); }, 1000);
+    el.removeAttribute('src'); el.load();
+    const total = res.reduce((n, r) => n + r.issues.length, 0);
+    out.innerHTML = res.map((r) => `<figure class="vkey${r.issues.length ? ' bad' : ''}"><img src="${r.url}" alt="分鏡 ${r.s.k + 1} 關鍵畫面"><figcaption><b>分鏡 ${r.s.k + 1}｜${esc(ROLES[r.s.role])}</b>
+      ${r.issues.length ? r.issues.map((x) => `<span class="warn">⚠ ${esc(x)}</span>`).join('') : '<span class="pubok">✓ 版面沒有偵測到問題</span>'}
+      <span class="muted">模糊中：${r.active.length ? esc([...new Set(r.active)].join('、')) : '無'}</span></figcaption></figure>`).join('');
+    vProg('vKeyProg', 1, total ? `⚠ 偵測到 ${total} 個可能的問題，請修改分鏡後重新產生；確認沒問題也可以直接按「已確認」` : '✓ 關鍵畫面完成，請逐張目視確認文字與模糊後按「已確認」');
+    v.keyShots = true;
+    const b = $('#vKeysOk'); b.hidden = false; b.disabled = false; b.textContent = total ? `我已檢查，接受目前版面（${total} 個提醒）` : '✓ 版面確認無誤';
+  } catch (e) { vProg('vKeyProg', null); out.innerHTML = `<div class="card err">${esc(e.message || e)}</div>`; }
+  finally { vBusy = ''; btn.disabled = false; }
 }
 
-/* ========== 算圖引擎（Canvas） ========== */
-// 固定亂數，讓預覽與輸出的噴霧一致
-const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
-const springy = (x) => { x = Math.max(0, x); return 1 - Math.exp(-6 * x) * Math.cos(9 * x); };
-
-function blurOf(img) {   // 小圖放大＝便宜又跨瀏覽器的模糊背景
-  const c = document.createElement('canvas'); c.width = 27; c.height = 48;
-  const x = c.getContext('2d'); const sc = Math.max(27 / img.width, 48 / img.height);
-  x.drawImage(img, (27 - img.width * sc) / 2, (48 - img.height * sc) / 2, img.width * sc, img.height * sc);
-  return c;
-}
-function rrect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-function wrapText(ctx, text, maxW) {
-  const lines = []; let cur = '';
-  for (const ch of String(text)) { if (ctx.measureText(cur + ch).width > maxW && cur) { lines.push(cur); cur = ch; } else cur += ch; }
-  if (cur) lines.push(cur);
-  return lines.slice(0, 3);
-}
-function pill(ctx, text, cy, size, bg, fg, alpha = 1, padX = 46, padY = 22, maxW = 940) {
-  if (!text || alpha <= 0) return;
-  ctx.save(); ctx.globalAlpha = alpha; ctx.font = `700 ${size}px ${VFONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const lines = wrapText(ctx, text, maxW - padX * 2), lh = size * 1.3;
-  const w = Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width)) + padX * 2), h = lines.length * lh + padY * 2;
-  ctx.shadowColor = 'rgba(59,47,37,0.18)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8;
-  ctx.fillStyle = bg; rrect(ctx, (VW - w) / 2, cy - h / 2, w, h, Math.min(h / 2, 40)); ctx.fill();
-  ctx.shadowColor = 'transparent'; ctx.fillStyle = fg;
-  lines.forEach((l, n) => ctx.fillText(l, VW / 2, cy - h / 2 + padY + lh * n + lh / 2));
-  ctx.restore();
-}
-// 旁白切成字幕：依標點切段、合併成 16 字內，時間依字數比例分配
-function subCues(text, dur) {
-  const parts = String(text).split(/(?<=[，。！？、,!?；;])/).map((x) => x.trim()).filter(Boolean);
-  const out = []; for (const p of parts) { if (out.length && (out[out.length - 1] + p).length <= 16) out[out.length - 1] += p; else out.push(p); }
-  const total = out.reduce((t, x) => t + x.length, 0) || 1; let t = 0;
-  return out.map((x) => { const d = dur * x.length / total; const c = { text: x.replace(/[，、,；;]$/, ''), from: t, to: t + d }; t += d; return c; });
-}
-function timeline(v, A) {
-  let t = 0;
-  return v.sections.map((s) => {
-    const vd = A.vo[s.id]?.duration || 0;
-    const speak = vd || String(s.text || '').length / 4.4;
-    const d = Math.max(2.6, speak + 0.8) + (s.effect === 'pack' ? 0.8 : 0);
-    const seg = { s, t0: t, d, speak, cues: subCues(s.text, speak) };
-    t += d; return seg;
-  });
-}
-// 依照片、效果與時間，算出照片在面板中的位置（cover＋以焦點為中心縮放）
-function placement(img, s, lt, d) {
-  const base = Math.max(PS / img.width, PS / img.height);
-  let zoom = 1, dy = 0;
-  if (s.effect === 'push' || s.effect === 'shine') zoom = 1 + 0.08 * ease(lt / d);
-  if (s.effect === 'mist') zoom = 1.02 + 0.08 * ease(lt / d);
-  if (s.effect === 'lift') { const p = springy((lt - 0.25) / 1.1); dy = 70 - 95 * Math.min(1.15, p); zoom = 1 + 0.04 * ease(lt / d); }
-  const sc = base * zoom, w = img.width * sc, h = img.height * sc;
-  const fx = s.point ? s.point[0] : 0.5, fy = s.point ? s.point[1] : 0.5;
-  const x0 = (PS - img.width * base) / 2, y0 = (PS - img.height * base) / 2;   // 未縮放時的位置
-  const px = x0 + fx * img.width * base, py = y0 + fy * img.height * base;   // 焦點在面板上的位置（固定不動）
-  return { x: px - fx * w, y: py - fy * h + dy, w, h, sc };
-}
-const MIST_BURSTS = (d) => [0.5, 1.7, 2.9].filter((b) => b < d - 0.6);
-function drawMist(ctx, ox, oy, angle, lt, d, seed) {
-  for (const [bi, b] of MIST_BURSTS(d).entries()) {
-    const age0 = lt - b; if (age0 < 0 || age0 > 1.4) continue;
-    const r = rng(seed * 31 + bi);
-    // 光暈
-    const glow = Math.sin(Math.min(1, age0 / 0.9) * Math.PI);
-    ctx.save(); ctx.translate(ox, oy); ctx.rotate(angle * Math.PI / 180); ctx.globalAlpha = 0.45 * glow;
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 380); g.addColorStop(0, 'rgba(255,255,255,0.8)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(220, 0, 300, 90, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    ctx.save(); ctx.fillStyle = '#FFFDF6';
-    for (let k = 0; k < 260; k++) {
-      const spawn = r() * 0.22, life = 0.5 + r() * 0.55, a = (angle + (r() - 0.5) * 30) * Math.PI / 180, reach = 380 + r() * 360, rad0 = 0.9 + r() * 1.9, op = 0.35 + r() * 0.55;
-      const age = age0 - spawn; if (age < 0 || age > life) continue;
-      const t = age / life, dist = reach * (1 - Math.pow(1 - t, 2.4));
-      ctx.globalAlpha = Math.pow(1 - t, 1.4) * op;
-      ctx.beginPath(); ctx.arc(ox + Math.cos(a) * dist, oy + Math.sin(a) * dist + t * t * 40, rad0 + t * 3, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.restore();
-  }
-}
-function panelFrame(ctx, fn, white) {
-  ctx.save(); ctx.shadowColor = 'rgba(59,47,37,0.25)'; ctx.shadowBlur = 60; ctx.shadowOffsetY = 24;
-  ctx.fillStyle = white ? '#fff' : VC.cream; rrect(ctx, 0, PY, PS, PS, 40); ctx.fill(); ctx.restore();
-  ctx.save(); rrect(ctx, 0, PY, PS, PS, 40); ctx.clip(); ctx.translate(0, PY); fn(); ctx.restore();
-}
-function drawFrame(ctx, t, A) {
-  const { segs, imgs, blurs, clips, v } = A;
-  ctx.fillStyle = VC.cream; ctx.fillRect(0, 0, VW, VH);
-  if (!segs.length) return;
-  const seg = segs.find((g) => t < g.t0 + g.d) || segs[segs.length - 1];
-  const s = seg.s, lt = Math.max(0, t - seg.t0), d = seg.d;
-  const img = imgs[s.image] || imgs[0];
-  const clip = s.useClip && clips[s.id];
-
-  if (s.effect === 'grid' && imgs.length) {
-    const n = Math.min(imgs.length, 6), cols = n <= 2 ? n : n === 4 ? 2 : 3, rows = Math.ceil(n / cols), gap = 20;
-    const cw = (VW - 80 - gap * (cols - 1)) / cols, ch = Math.min(cw * 1.25, (1180 - gap * (rows - 1)) / rows), top = 420 + (1180 - (ch * rows + gap * (rows - 1))) / 2;
-    for (let k = 0; k < n; k++) {
-      const p = springy((lt - k * 0.12) / 0.7); if (p <= 0) continue;
-      const im = imgs[k], cx = 40 + (k % cols) * (cw + gap), cy = top + Math.floor(k / cols) * (ch + gap), sc = 0.6 + 0.4 * Math.min(1.05, p);
-      ctx.save(); ctx.globalAlpha = Math.min(1, p * 1.4); ctx.translate(cx + cw / 2, cy + ch / 2); ctx.scale(sc, sc);
-      ctx.shadowColor = 'rgba(59,47,37,0.22)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 12; ctx.fillStyle = '#fff'; rrect(ctx, -cw / 2, -ch / 2, cw, ch, 26); ctx.fill();
-      ctx.shadowColor = 'transparent'; rrect(ctx, -cw / 2, -ch / 2, cw, ch, 26); ctx.clip();
-      const k2 = Math.max(cw / im.width, ch / im.height); ctx.drawImage(im, -im.width * k2 / 2, -im.height * k2 / 2, im.width * k2, im.height * k2);
-      ctx.restore();
-    }
-  } else if (s.effect === 'pack' && img && !clip) {
-    const a = ease(lt / 0.4), sc = (0.97 + 0.03 * a) * (1 + 0.04 * (lt / d));
-    ctx.save(); ctx.globalAlpha = a; ctx.translate(VW / 2, PY + PS / 2); ctx.scale(sc, sc); ctx.translate(-VW / 2, -(PY + PS / 2));
-    panelFrame(ctx, () => { const k = Math.min(PS / img.width, PS / img.height) * 0.92; ctx.drawImage(img, (PS - img.width * k) / 2, (PS - img.height * k) / 2, img.width * k, img.height * k); }, true);
-    ctx.restore();
-    const b = ease((lt - 0.2) / 0.5);
-    ctx.save(); ctx.globalAlpha = b; ctx.fillStyle = VC.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.font = `800 80px ${VFONT}`; wrapText(ctx, v.endTitle, 980).slice(0, 2).forEach((l, n, arr) => ctx.fillText(l, VW / 2, 230 - (arr.length - 1) * 48 + n * 96 + (1 - b) * 20));
-    ctx.font = `700 44px ${VFONT}`; ctx.globalAlpha = ease((lt - 0.45) / 0.5); ctx.fillText(v.endSub, VW / 2, 1760);
-    ctx.restore();
-  } else if (img || clip) {
-    // 模糊背景
-    const bl = clip ? null : blurs[imgs.indexOf(img)];
-    if (bl) { ctx.save(); ctx.globalAlpha = 0.55; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(bl, -60, -60, VW + 120, VH + 120); ctx.restore(); ctx.fillStyle = 'rgba(239,231,220,0.45)'; ctx.fillRect(0, 0, VW, VH); }
-    const press = s.effect === 'mist' ? MIST_BURSTS(d).reduce((acc, b) => { const x = lt - b + 0.05; return acc + (x > 0 && x < 0.27 ? Math.sin(x / 0.27 * Math.PI) * 7 : 0); }, 0) : 0;
-    panelFrame(ctx, () => {
-      if (clip && clip.readyState >= 2) {
-        const k = Math.max(PS / clip.videoWidth, PS / clip.videoHeight); ctx.drawImage(clip, (PS - clip.videoWidth * k) / 2, (PS - clip.videoHeight * k) / 2, clip.videoWidth * k, clip.videoHeight * k);
-        return;
-      }
-      if (!img) return;
-      const p = placement(img, s, lt, d);
-      ctx.drawImage(img, p.x, p.y + press, p.w, p.h);
-      if (s.effect === 'mist') {
-        const fx = s.point ? s.point[0] : 0.3, fy = s.point ? s.point[1] : 0.35;
-        drawMist(ctx, p.x + fx * p.w, p.y + press + fy * p.h, Number(s.dir ?? 180), lt, d, hashNum(s.id));
-      }
-      if (s.effect === 'shine') {
-        const x = -400 + 1900 * ease((lt - 0.3) / 1.4);
-        const g = ctx.createLinearGradient(x - 220, 0, x + 220, 0);
-        g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.6; ctx.setTransform(1, 0, -0.35, 1, 0, PY); ctx.fillStyle = g; ctx.fillRect(x - 260, 0, 520, PS); ctx.restore();
-      }
-    });
-  }
-  // 字卡
-  if (s.card && s.effect !== 'pack') pill(ctx, s.card, 210, 66, VC.card, VC.ink, ease((lt - 0.15) / 0.35));
-  // 字幕
-  const sl = lt - 0.15, cue = seg.cues.find((c) => sl >= c.from && sl < c.to);
-  if (cue) { const a = Math.min(1, (sl - cue.from) / 0.12, (cue.to - sl) / 0.12); pill(ctx, cue.text, s.effect === 'pack' ? 1640 : 1620, 54, VC.sub, '#fff', a, 36, 16); }
-}
-const hashNum = (s) => { let h = 7; for (const c of String(s)) h = (h * 31 + c.codePointAt(0)) | 0; return h; };
-
-async function loadAssets(i, onStep, light) {
-  const v = V(i), A = { v, imgs: [], blurs: [], vo: {}, clips: {}, music: null };
-  const steps = v.images.length + (light ? 0 : v.sections.length + (v.music ? 1 : 0)); let n = 0;
-  const step = (l) => onStep?.(++n / Math.max(1, steps), l);
-  for (const im of v.images) { A.imgs.push(await createImageBitmap(await mGet(im.key))); step('讀取照片'); }
-  A.blurs = A.imgs.map(blurOf);
-  if (light) { A.segs = timeline(v, A); A.total = A.segs.reduce((t, g) => t + g.d, 0); return A; }
-  for (const s of v.sections) {
-    const a = v.audio[s.id];
-    if (v.voice.on && a?.key && a.key === ttsKey(i, s, v)) { try { A.vo[s.id] = await decode(await mGet(a.key)); } catch { /* 缺檔就不念 */ } }
-    const c = v.clips[s.id];
-    if (s.useClip && c?.state === 'done' && c.key) {
-      try {
-        const el = document.createElement('video'); el.muted = true; el.playsInline = true; el.preload = 'auto'; el.src = await mUrl(c.key);
-        await new Promise((res) => { el.onloadeddata = res; el.onerror = res; setTimeout(res, 8000); });
-        if (el.readyState >= 2) A.clips[s.id] = el;
-      } catch { /* 沒有影片就用照片動畫 */ }
-    }
-    step('讀取配音與動態鏡頭');
-  }
-  if (v.music) { try { A.music = await decode(await mGet(v.music.key)); } catch { toast('背景音樂讀取失敗，將不放音樂'); } step('讀取音樂'); }
-  A.segs = timeline(v, A); A.total = A.segs.reduce((t, g) => t + g.d, 0);
-  return A;
-}
-function sprayBuffer(ac) {
-  const len = Math.round(ac.sampleRate * 0.5), b = ac.createBuffer(1, len, ac.sampleRate), d = b.getChannelData(0);
-  let last = 0; for (let k = 0; k < len; k++) { const w = Math.random() * 2 - 1; last = 0.6 * last + 0.4 * w; const env = k < len * 0.03 ? k / (len * 0.03) : Math.pow(1 - k / len, 2.2); d[k] = (w - last) * env * 0.9; }
-  return b;
-}
-// 排程所有聲音，回傳開始時間
-function scheduleAudio(ac, A, out) {
-  const T0 = ac.currentTime + 0.3, nodes = [];
-  const play = (buf, at, gain, loop, dur) => { const src = ac.createBufferSource(); src.buffer = buf; src.loop = !!loop; const g = ac.createGain(); g.gain.value = gain; src.connect(g).connect(out); src.start(at, 0, loop ? undefined : dur); nodes.push(src); return g; };
-  for (const g of A.segs) if (A.vo[g.s.id]) play(A.vo[g.s.id], T0 + g.t0 + 0.15, 1);
-  const sp = sprayBuffer(ac);
-  for (const g of A.segs) if (g.s.effect === 'mist' && !(g.s.useClip && A.clips[g.s.id])) for (const b of MIST_BURSTS(g.d)) play(sp, T0 + g.t0 + b, 0.5);
-  if (A.music && A.v.musicVol > 0) {
-    const g = play(A.music, T0, 0, true), vol = Number(A.v.musicVol);
-    g.gain.setValueAtTime(0, T0); g.gain.linearRampToValueAtTime(vol, T0 + 0.6);
-    g.gain.setValueAtTime(vol, T0 + Math.max(0.7, A.total - 1.4)); g.gain.linearRampToValueAtTime(0, T0 + A.total);
-    nodes[nodes.length - 1].stop(T0 + A.total + 0.05);
-  }
-  return { T0, stop: () => nodes.forEach((n) => { try { n.stop(); } catch { /* 已停止 */ } }) };
-}
-function syncClips(A, t, playing) {
-  for (const g of A.segs) {
-    const el = A.clips[g.s.id]; if (!el) continue;
-    const inSeg = t >= g.t0 && t < g.t0 + g.d;
-    if (inSeg && playing) { if (el.paused) { el.currentTime = Math.min(t - g.t0, (el.duration || 99) - 0.05); el.play().catch(() => {}); } }
-    else if (!el.paused) el.pause();
-  }
-}
-
-let vRun = null;   // 目前的預覽或輸出工作
+/* ========== 預覽與輸出 ========== */
+let vRun = null;
 function vStopAll() { if (vRun) { vRun.cancel(); vRun = null; } }
 async function drawStill(i) {
   const c = $('#vCanvas'); if (!c) return; const ctx = c.getContext('2d'); const v = V(i);
-  ctx.fillStyle = VC.cream; ctx.fillRect(0, 0, VW, VH);
-  if (!v.sections.length || !v.images.length) { pill(ctx, v.images.length ? '產生腳本後可預覽' : '請先上傳照片', VH / 2, 56, VC.card, VC.ink); return; }
-  try { const A = await loadAssets(i, null, true); A.segs.length && drawFrame(ctx, Math.min(1.2, A.total), A); } catch { /* 預覽圖失敗不影響操作 */ }
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, VW, VH);
+  try {
+    const url = await srcURL(i); if (!url || !v.plan) return;
+    const el = mkVideo(url); await vidReady(el);
+    const R = buildRender(i, []); const s = R.shots[Math.min(1, R.shots.length - 1)]; const lt = Math.min(1.3, s.d - 0.3);
+    await seekTo(el, s.srcStart + lt * s.rate); drawFrame(ctx, s.t0 + lt, R, el);
+    el.removeAttribute('src'); el.load();
+  } catch { /* 預覽圖失敗不影響操作 */ }
 }
 async function runPlayback(record) {
   const i = vItem(); if (!i) return; const v = V(i);
-  if (!v.sections.length) return;
+  if (!v.plan) return;
   if (vBusy) { toast('目前有其他工作進行中'); return; }
+  if (v.plan?.prohibited?.blocked) { toast('這類商品依法規不能製作廣告影片'); return; }
   vStopAll(); vBusy = record ? 'render' : 'play';
   const c = $('#vCanvas'), ctx = c.getContext('2d'), pid = 'vRenderProg';
-  let cancelled = false, raf = 0, audio = null, rec = null, A = null;
-  const job = { cancel: () => { cancelled = true; cancelAnimationFrame(raf); audio?.stop(); if (rec && rec.state !== 'inactive') rec.stop(); Object.values(A?.clips || {}).forEach((el) => el.pause()); vBusy = ''; } };
+  let cancelled = false, raf = 0, audio = null, rec = null, els = [];
+  const job = { cancel: () => { cancelled = true; cancelAnimationFrame(raf); audio?.stop(); if (rec && rec.state !== 'inactive') rec.stop(); els.forEach((e) => e.pause()); vBusy = ''; } };
   vRun = job;
   try {
-    vProg(pid, 0, '載入素材…');
-    A = await loadAssets(i, (p, l) => vProg(pid, p * 0.1, `${l}…`));
+    vProg(pid, 0, '載入實拍影片…');
+    const url = await srcURL(i); if (!url) throw new Error('這台裝置上沒有這支影片，請在「2.」重新選擇同一支影片');
+    els = [mkVideo(url), mkVideo(url)]; await Promise.all(els.map(vidReady));
+    const R = buildRender(i, els);
+    await seekTo(els[0], R.shots[0].srcStart); els[0].playbackRate = R.shots[0].rate;
+    if (R.shots[1]) seekTo(els[1], R.shots[1].srcStart);
     if (cancelled) return;
-    const missing = v.voice.on ? v.sections.filter((s) => s.text.trim() && !A.vo[s.id]).length : 0;
-    if (missing && record && !confirm(`有 ${missing} 段還沒產生配音（或旁白改過還沒重新產生），這幾段會沒有聲音。仍要輸出？`)) { job.cancel(); vProg(pid, null); return; }
     const ac = actx(); await ac.resume();
-    let out = ac.destination, dest = null;
+    let out = ac.destination, mime = '';
     if (record) {
-      dest = ac.createMediaStreamDestination(); out = dest;
-      const types = ['video/mp4;codecs=avc1.42E01F,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-      const mime = types.find((x) => window.MediaRecorder && MediaRecorder.isTypeSupported(x));
+      const dest = ac.createMediaStreamDestination(); out = dest;
+      const types = ['video/mp4;codecs=avc1.42E01F,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+      mime = types.find((x) => window.MediaRecorder && MediaRecorder.isTypeSupported(x));
       if (!mime || !c.captureStream) throw new Error('這個瀏覽器不支援在網頁中錄製影片，請改用電腦版 Chrome 或 Edge');
       const stream = new MediaStream([...c.captureStream(30).getVideoTracks(), ...dest.stream.getAudioTracks()]);
-      rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8e6, audioBitsPerSecond: 160e3 });
+      rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 10e6, audioBitsPerSecond: 192e3 });
       const chunks = []; rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       rec.onstop = () => {
         if (cancelled && !rec._done) return;
         const blob = new Blob(chunks, { type: mime.split(';')[0] }), ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
-        const url = URL.createObjectURL(blob), name = `${(v.title || i.name).replace(/[\\/:*?"<>|]+/g, '').slice(0, 30)}_${today()}.${ext}`;
-        $('#vOut').innerHTML = `<video class="vout" controls playsinline src="${url}"></video>
-          <div class="btns"><a class="btn pri" href="${url}" download="${esc(name)}">下載影片（${ext.toUpperCase()}，${(blob.size / 1048576).toFixed(1)} MB）</a></div>
-          ${ext === 'webm' ? '<p class="hint">這個瀏覽器只能輸出 WebM。IG、蝦皮等平台若不接受，可用 CapCut 或線上轉檔工具轉成 MP4。</p>' : ''}`;
-        vProg(pid, 1, `✓ 輸出完成：${secs(A.total)}、${ext.toUpperCase()}`);
+        const u = URL.createObjectURL(blob), name = `${(i.name).replace(/[\\/:*?"<>|]+/g, '').slice(0, 24)}_${STYLES[v.plan.style].name}_${today()}.${ext}`;
+        $('#vOut').innerHTML = `<video class="vout" controls playsinline src="${u}"></video>
+          <div class="btns"><a class="btn pri" href="${u}" download="${esc(name)}">下載影片（${ext.toUpperCase()}，${(blob.size / 1048576).toFixed(1)} MB）</a></div>
+          ${ext === 'webm' ? '<p class="hint warn">這個瀏覽器只能輸出 WebM，請改用電腦版 Chrome 或 Edge 輸出 MP4。</p>' : ''}`;
+        vProg(pid, 1, `✓ 輸出完成：${f1(R.total)} 秒、1080×1920、${ext.toUpperCase()}`);
+        v.exportedAt = new Date().toISOString(); vSaveNow(); $('#vReport').textContent = reportText(i, v);
       };
-      // H.264（MP4）編碼器第一次啟動要幾秒，期間錄到的畫面會被丟掉（實測無 GPU 時約 3.5 秒）。
-      // 1) 這個頁面第一次輸出 MP4 時，先用一個拋棄式錄影器暖機；之後的錄製就幾乎不會掉格。
-      // 2) 正式錄製開始後先停在第一格約 1 秒，吃掉剩下的少量掉格，再開始播放時間軸。
+      // H.264 編碼器第一次啟動要幾秒、期間的畫面會被丟掉：先用拋棄式錄影器暖機，正式錄製開始後再停在第一格約 1 秒
       const hold = (sec, label) => new Promise((res) => {
         const w0 = performance.now();
-        const f = () => {
-          if (cancelled) return res();
-          const el = (performance.now() - w0) / 1000;
-          drawFrame(ctx, 0, A); vProg(pid, 0.1 * Math.min(1, el / sec), label);
-          if (el >= sec) res(); else raf = requestAnimationFrame(f);
-        };
+        const f = () => { if (cancelled) return res(); const e = (performance.now() - w0) / 1000; drawFrame(ctx, 0, R); vProg(pid, 0.05 * Math.min(1, e / sec), label); if (e >= sec) res(); else raf = requestAnimationFrame(f); };
         f();
       });
       if (mime.startsWith('video/mp4') && !runPlayback.warm) {
         const w = new MediaRecorder(stream, { mimeType: mime }); w.ondataavailable = () => {}; w.start(250);
         await hold(4.5, '第一次錄影，編碼器暖機中（約 4 秒）…');
         await new Promise((res) => { w.onstop = res; w.stop(); });
-        runPlayback.warm = true;
-        if (cancelled) return;
+        runPlayback.warm = true; if (cancelled) return;
       }
       rec.start(250);
       await hold(mime.startsWith('video/mp4') ? 1 : 0.3, '準備錄影中…');
       if (cancelled) return;
     }
-    audio = scheduleAudio(ac, A, out);
+    audio = synth(ac, R, out);
     const warnHidden = () => { if (document.hidden && record) toast('錄製中請不要切換分頁，否則畫面會停住'); };
     document.addEventListener('visibilitychange', warnHidden);
-    let lastP = 0;
+    let cur = -1, lastP = 0, pendingSeek = -1;
     const loop = () => {
       if (cancelled) return;
       const t = ac.currentTime - audio.T0;
-      if (t >= A.total) {
-        drawFrame(ctx, A.total - 0.001, A); syncClips(A, A.total, false);
+      if (t >= R.total) {
+        drawFrame(ctx, R.total - 0.001, R); els.forEach((e) => e.pause());
         document.removeEventListener('visibilitychange', warnHidden);
-        if (rec) { rec._done = true; setTimeout(() => rec.state !== 'inactive' && rec.stop(), 300); vProg(pid, 0.99, '封裝影片中…'); }
-        else vProg(pid, 1, '預覽結束');
-        vRun = null; vBusy = '';
-        return;
+        if (rec) { rec._done = true; setTimeout(() => rec.state !== 'inactive' && rec.stop(), 300); vProg(pid, 0.99, '封裝影片中…'); } else vProg(pid, 1, '預覽結束');
+        vRun = null; vBusy = ''; return;
       }
-      if (t >= 0) { drawFrame(ctx, t, A); syncClips(A, t, true); }
+      if (t >= 0) {
+        const k0 = R.shots.findIndex((s) => t < s.t0 + s.d), k = k0 === -1 ? R.shots.length - 1 : k0;
+        if (k !== cur) {   // 換分鏡：播放已預先跳到位置的影片；上一個影片元素停在最後畫面給轉場用
+          cur = k; const s = R.shots[k], el = els[k % 2];
+          els[(k + 1) % 2].pause(); el.playbackRate = s.rate; el.play().catch(() => {});
+          pendingSeek = k + 1 < R.shots.length ? k + 1 : -1;
+        }
+        const s = R.shots[cur], el = els[cur % 2], want = s.srcStart + (t - s.t0) * s.rate;
+        if (pendingSeek > 0 && t - s.t0 > TR_DUR + 0.05) {   // 轉場結束後，另一個影片元素預先跳到下一個分鏡
+          const nx = R.shots[pendingSeek], o = els[pendingSeek % 2]; o.playbackRate = nx.rate; seekTo(o, nx.srcStart); pendingSeek = -1;
+        }
+        if (Math.abs(el.currentTime - want) > 0.3 && !el.seeking) el.currentTime = want;
+        drawComposite(ctx, t, R, els);
+      }
       const now = performance.now();
-      if (now - lastP > 200) { lastP = now; const tt = Math.max(0, t); vProg(pid, 0.1 + 0.89 * tt / A.total, `${record ? '錄製中' : '預覽中'} ${secs(tt)}／${secs(A.total)}${record ? `｜剩約 ${secs(A.total - tt)}` : ''}`); }
+      if (now - lastP > 200) { lastP = now; const tt = Math.max(0, t); vProg(pid, 0.05 + 0.94 * tt / R.total, `${record ? '錄製中' : '預覽中'} ${secs(tt)}／${secs(R.total)}${record ? `｜剩約 ${secs(R.total - tt)}` : ''}`); }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
   } catch (e) { job.cancel(); vProg(pid, null); $('#vOut').innerHTML = `<div class="card err">${esc(e.message || e)}</div>`; }
 }
 
-/* ========== 噴口／焦點位置設定 ========== */
-async function pointDlg(k) {
-  const i = vItem(); if (!i) return; const v = V(i), s = v.sections[k]; if (!s) return;
-  const im = v.images[s.image] || v.images[0]; if (!im) return;
+/* ========== 交付說明 ========== */
+function reportText(i, v) {
+  const p = v.plan; if (!p) return '完成分鏡後會產生交付說明。';
+  const st = STYLES[p.style];
+  let t = 0;
+  const RR = { plan: p, shots: p.shots };
+  const shots = p.shots.map((s, k) => { const d = Math.min(SHOT_MAX, Math.max(SHOT_MIN, Number(s.dur) || 3)); const line = `${k + 1}. ${f1(t)}–${f1(t + d)} 秒｜${ROLES[s.role]}｜${s.role === 'cta' && !s.caption ? p.cta : s.caption}${s.sub ? `／${s.sub}` : ''}｜${MOVES[s.move]}＋${FXS[s.fx]}${k ? `｜轉場：${TRANS[trFor(RR, k)]}${s.tr && s.tr !== 'auto' ? '（手動）' : ''}` : ''}${s.demo ? '｜含示意註記' : ''}`; t += d; return line; });
+  const blurs = v.manualBlur.map((m) => `${m.label}（全程固定位置）`);
+  const sources = p.shots.map((s, k) => `分鏡 ${k + 1}：${s.source || '（未提供）'}`);
+  const confirmList = [
+    ...p.shots.flatMap((s, k) => copyIssues(`${s.caption} ${s.sub}`).map((x) => `分鏡 ${k + 1}：${x}`)),
+    ...(blurs.length ? [] : ['影片沒有加任何模糊框：請確認畫面中沒有價格、日期、促銷吊牌、別家商品或他人角色']),
+    '請對照實物確認品名、規格與賣點文字正確（AI 沒有看影片，文案只依提示詞）',
+  ];
+  return [
+    `【影片】${i.name}`,
+    `【風格】${st.name}：${p.styleReason || '—'}`,
+    `【劇情】${p.story || '—'}`,
+    `【分鏡】（總長 ${f1(t)} 秒，1080×1920、30fps）`, ...shots,
+    `【遮蔽】${blurs.length ? blurs.join('、') : '無'}`,
+    `【文案依據】（只使用你輸入的提示詞）`, ...sources,
+    ...(v.desc ? [`【提示詞】${v.desc}`] : []),
+    `【配樂與音效】程式即時合成（${st.music.bpm} BPM${st.music.minor ? '、小調' : '、大調'}），含轉場、點擊、叮聲${st.music.amb ? '、環境音' : ''}，未使用現成音樂；原始影片聲音已靜音`,
+    `【Reels 推薦標註】${(p.hashtags || []).join(' ') || '（未產生）'}`,
+    `【需要你確認】`, ...confirmList.map((x) => `・${x}`),
+    v.exportedAt ? `【輸出時間】${fmtDT(v.exportedAt)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+/* ========== 手動模糊框 ========== */
+async function blurDlg() {
+  const i = vItem(); if (!i) return; const v = V(i), a = v.analysis; if (!a) return;
   const d = $('#dlg');
-  d.innerHTML = `<div class="dlg-head"><h2>第 ${k + 1} 段｜點選${s.effect === 'mist' ? '噴口' : '焦點'}位置</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
-    <p class="hint">${s.effect === 'mist' ? '在照片上點一下產品噴出霧的位置（噴嘴）。' : '在照片上點一下要推近的重點位置。'}</p>
-    <div class="vpoint"><img id="vPtImg" alt="照片"><span class="vdot" id="vPtDot" hidden></span></div>
-    <div class="btns"><button type="button" class="pri" data-act="closeDlg">完成</button>${s.point ? '<button type="button" class="ghost" data-act="vPointClear" data-k="' + k + '">清除（用預設位置）</button>' : ''}</div>`;
-  const img = $('#vPtImg'); img.src = await mUrl(im.key);
-  const dot = $('#vPtDot');
-  const show = () => { if (!s.point) return; dot.hidden = false; dot.style.left = `${s.point[0] * 100}%`; dot.style.top = `${s.point[1] * 100}%`; };
-  img.onload = show;
-  img.onclick = (e) => { const r = img.getBoundingClientRect(); s.point = [Math.round((e.clientX - r.left) / r.width * 1000) / 1000, Math.round((e.clientY - r.top) / r.height * 1000) / 1000]; show(); save.i(); };
-  d.onclose = () => { const y = window.scrollY; renderVideo(true); window.scrollTo(0, y); };
+  d.innerHTML = `<div class="dlg-head"><h2>手動加模糊框</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+    <p class="hint">選一格畫面，在畫面上拖曳框出要模糊的範圍（例如漏掉的價格貼紙）。手動框會在整支影片的同一個位置全程模糊。</p>
+    <label>畫面<select id="vBdFrame">${a.times.map((t, k) => `<option value="${k}">${f1(t)} 秒</option>`).join('')}</select></label>
+    <div class="vpoint"><canvas id="vBdCanvas" width="360" height="640"></canvas></div>
+    <label>名稱<input id="vBdLabel" maxlength="20" value="價格貼紙"></label>
+    <div class="btns"><button type="button" class="pri" data-act="vBlurSave">加入</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>`;
   if (!d.open) d.showModal();
+  const cv = $('#vBdCanvas'), x = cv.getContext('2d');
+  let frames = thumbCache.id === i.id ? thumbCache.list : [];
+  if (!frames.length) { x.fillStyle = '#222'; x.fillRect(0, 0, cv.width, cv.height); frames = await grabFrames(i, a.times).catch(() => []); }
+  let geo = null; blurDlg.box = null;
+  const paint = () => {
+    const fr = frames[+$('#vBdFrame').value]; x.fillStyle = '#222'; x.fillRect(0, 0, cv.width, cv.height); if (!fr) return;
+    const im = fr.canvas, sc = Math.min(cv.width / im.width, cv.height / im.height), w = im.width * sc, h = im.height * sc;
+    geo = { ox: (cv.width - w) / 2, oy: (cv.height - h) / 2, w, h }; x.drawImage(im, geo.ox, geo.oy, w, h);
+    const b = blurDlg.box; if (b) { x.strokeStyle = '#ff9500'; x.lineWidth = 3; x.strokeRect(geo.ox + b[1] / 1000 * w, geo.oy + b[0] / 1000 * h, (b[3] - b[1]) / 1000 * w, (b[2] - b[0]) / 1000 * h); }
+  };
+  $('#vBdFrame').onchange = paint; paint();
+  const pos = (e) => { const r = cv.getBoundingClientRect(), px = (e.clientX - r.left) * cv.width / r.width, py = (e.clientY - r.top) * cv.height / r.height; return [Math.max(0, Math.min(1000, (py - geo.oy) / geo.h * 1000)), Math.max(0, Math.min(1000, (px - geo.ox) / geo.w * 1000))]; };
+  let st = null;
+  cv.onpointerdown = (e) => { if (!geo) return; cv.setPointerCapture(e.pointerId); st = pos(e); };
+  cv.onpointermove = (e) => { if (!st) return; const p = pos(e); blurDlg.box = [Math.min(st[0], p[0]), Math.min(st[1], p[1]), Math.max(st[0], p[0]), Math.max(st[1], p[1])]; paint(); };
+  cv.onpointerup = () => { st = null; };
 }
 
 /* ========== 事件 ========== */
 Object.assign(ACT, {
-  vScript(b) { genScript(b); },
-  vAddSec() { const i = vItem(); if (!i) return; const v = V(i); v.sections.push({ id: uid(), text: '', card: '', effect: 'push', image: 0, motion: '', useClip: false }); save.i(); renderVideo(true); },
-  vSecDel(b) { const i = vItem(); if (!i) return; const v = V(i), k = +b.dataset.k, s = v.sections[k]; if (!s || !confirm(`刪除第 ${k + 1} 段？`)) return; if (v.audio[s.id]?.key) mDel(v.audio[s.id].key); delete v.audio[s.id]; v.sections.splice(k, 1); save.i(); renderVideo(true); },
-  vSecUp(b) { const i = vItem(); if (!i) return; const v = V(i), k = +b.dataset.k; if (k < 1) return; [v.sections[k - 1], v.sections[k]] = [v.sections[k], v.sections[k - 1]]; save.i(); renderVideo(true); },
-  vImgDel(b) {
-    const i = vItem(); if (!i) return; const v = V(i), k = +b.dataset.k, im = v.images[k]; if (!im || !confirm(`刪除照片 ${k + 1}？`)) return;
-    mDel(im.key); v.images.splice(k, 1);
-    v.sections.forEach((s) => { if (s.image === k) { s.image = 0; s.point = null; } else if (s.image > k) s.image--; });
-    save.i(); renderVideo(true);
+  async vNewProj() {
+    if (vBusy) { toast('目前有其他工作進行中'); return; }
+    const cur = vItem();
+    if (cur?.video?.src && !confirm('新增專案會清除目前的影片、提示詞與分鏡，確定？')) return;
+    vStopAll();
+    // 只保留一個專案：舊專案與存在這台裝置的影片一併清除
+    for (const p of vProjects) await IDB.del(p.id).catch(() => {});
+    if (srcUrl) URL.revokeObjectURL(srcUrl); srcUrl = ''; srcFor = '';
+    vProjects = [newProject()]; vSaveNow(); vPick(vProjects[0].id);
   },
-  vImgLeft(b) {
-    const i = vItem(); if (!i) return; const v = V(i), k = +b.dataset.k; if (k < 1) return;
-    [v.images[k - 1], v.images[k]] = [v.images[k], v.images[k - 1]];
-    v.sections.forEach((s) => { if (s.image === k) s.image = k - 1; else if (s.image === k - 1) s.image = k; });
-    save.i(); renderVideo(true);
+  vPlan(b) { runPlan(b); },
+  vKeys(b) { runKeys(b); },
+  vKeysOk() { const i = vItem(); if (!i) return; const v = V(i); v.checked = true; vSaveNow(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y); toast('已確認版面，可以輸出影片'); },
+  vAddShot() { const i = vItem(); if (!i) return; const v = V(i); if (v.plan.shots.length >= 6) { toast('最多 6 個分鏡'); return; } v.plan.shots.splice(v.plan.shots.length - 1, 0, { role: 'point', caption: '', sub: '', start: 0, dur: 3, move: 'push', fx: 'bounce', demo: false, source: '' }); vDirty(v); vSaveNow(); renderVideo(true); },
+  vShotDel(b) { const i = vItem(); if (!i) return; const v = V(i); if (v.plan.shots.length <= 5) { toast('至少要 5 個分鏡'); return; } v.plan.shots.splice(+b.dataset.k, 1); vDirty(v); vSaveNow(); renderVideo(true); },
+  vShotUp(b) { const i = vItem(); if (!i) return; const s = V(i).plan.shots, k = +b.dataset.k; if (k < 1) return; [s[k - 1], s[k]] = [s[k], s[k - 1]]; vDirty(V(i)); vSaveNow(); renderVideo(true); },
+  vBlurAdd() { blurDlg(); },
+  vBlurSave() {
+    const i = vItem(); if (!i) return; const v = V(i), b = blurDlg.box;
+    if (!b || b[2] - b[0] < 5 || b[3] - b[1] < 5) { toast('請在畫面上拖曳框出範圍'); return; }
+    v.manualBlur.push({ id: `m${Date.now().toString(36)}`, label: $('#vBdLabel').value.trim().slice(0, 20) || '手動模糊', box: b.map((n) => Math.round(n)) });
+    vDirty(v); vSaveNow(); $('#dlg').close(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y);
   },
-  vPoint(b) { pointDlg(+b.dataset.k); },
-  vPointClear(b) { const i = vItem(); if (!i) return; const s = V(i).sections[+b.dataset.k]; if (s) { s.point = null; save.i(); } $('#dlg').close(); },
-  vTts(b) { genTts(b); },
-  vTtsTest(b) { ttsTest(b); },
-  vMusicDel() { const i = vItem(); if (!i) return; const v = V(i); if (v.music?.key) mDel(v.music.key); v.music = null; save.i(); renderVideo(true); },
-  vOmni(b) { genOmni(b); },
+  vBlurDel(b) { const i = vItem(); if (!i) return; const v = V(i); v.manualBlur.splice(+b.dataset.k, 1); vDirty(v); vSaveNow(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y); },
   vPlay() { runPlayback(false); },
   vStop() { vStopAll(); vProg('vRenderProg', null); const i = vItem(); if (i) drawStill(i); },
   vRender() { runPlayback(true); },
+  vCopyReport(b) { copy($('#vReport')?.textContent || '', b); },
+  vCopyTags(b) { const i = vItem(); if (i) copy((V(i).plan?.hashtags || []).join(' '), b); },
 });
 
 document.addEventListener('change', async (e) => {
   const t = e.target;
-  if (t.id === 'vItem') { vStopAll(); vSel = t.value; store.set('vSel', vSel); renderVideo(true); return; }
   if (!t.closest?.('#v-video')) return;
   const i = vItem(); if (!i) return; const v = V(i);
-  if (t.matches('[data-vf="img"]') && t.files.length) {
-    const files = [...t.files].slice(0, MAX_IMGS - v.images.length); t.value = '';
-    if (!files.length) { toast(`最多 ${MAX_IMGS} 張`); return; }
-    let n = 0;
-    try {
-      for (const f of files) {
-        vProg('vImgProg', n / files.length, `上傳中 ${n + 1}／${files.length}：${f.name}`);
-        const blob = await shrink(f, 1080), key = `img_${vsafe(i.id)}_${uid()}`;
-        await mPut(key, blob); v.images.push({ key }); n++; save.i();
-      }
-      vProg('vImgProg', 1, `✓ 已上傳 ${n} 張`);
-    } catch (err) { vProg('vImgProg', n / files.length, `上傳失敗：${err.message}`); }
-    const y = window.scrollY; renderVideo(true); window.scrollTo(0, y);
-    return;
-  }
-  if (t.matches('[data-vf="music"]') && t.files.length) {
+  if (t.matches('[data-vf="src"]') && t.files.length) {
     const f = t.files[0]; t.value = '';
-    if (f.size > 5.4 * 1048576) { toast('音樂檔超過 5 MB，請先壓縮或剪短'); return; }
-    vProg('vMusicProg', -1, `上傳中：${f.name}`);
+    if (f.size > MAX_SRC_MB * 1048576) { toast(`影片超過 ${MAX_SRC_MB} MB，請先剪短或壓縮`); return; }
+    vProg('vSrcProg', -1, `讀取影片：${f.name}`);
     try {
-      const key = `music_${vsafe(i.id)}_${uid()}`, blob = f.type ? f : new Blob([f], { type: 'audio/mpeg' });
-      await decode(blob);   // 先確認瀏覽器能播放
-      await mPut(key, blob);
-      if (v.music?.key) mDel(v.music.key);
-      v.music = { key, name: f.name.slice(0, 80) }; save.i();
-      vProg('vMusicProg', 1, '✓ 音樂已上傳'); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y);
-    } catch (err) { vProg('vMusicProg', null); toast(`音樂上傳失敗：${err.message || '格式不支援'}`); }
+      const u = URL.createObjectURL(f), el = mkVideo(u); await vidReady(el);
+      if (!el.duration || !isFinite(el.duration)) throw new Error('讀不到影片長度，請轉成 MP4 後再上傳');
+      if (el.duration < 3) throw new Error('影片太短（至少 3 秒）');
+      const meta = { name: f.name.slice(0, 80), size: f.size, duration: Math.round(el.duration * 100) / 100, w: el.videoWidth, h: el.videoHeight, at: new Date().toISOString() };
+      URL.revokeObjectURL(u);
+      await IDB.set(i.id, f); navigator.storage?.persist?.();
+      const same = v.src && v.src.name === meta.name && v.src.size === meta.size;
+      v.src = meta; srcFor = '';
+      if (!same || i.name === '未命名影片') i.name = meta.name.replace(/\.[^.]+$/, '').slice(0, 60) || '未命名影片';
+      if (!same) { v.analysis = null; v.plan = null; v.checked = false; v.blurOff = []; v.manualBlur = []; v.ownRecheck = false; }
+      thumbCache = { id: '', list: [] };
+      vSaveNow(); vProg('vSrcProg', 1, same ? '✓ 已重新連結同一支影片，分析與分鏡沿用' : '✓ 影片已存到這台裝置'); renderVideo(true);
+    } catch (err) { vProg('vSrcProg', null); toast(err.message || '影片讀取失敗'); }
     return;
   }
-  // 會影響版面的欄位：改完重繪
-  if (t.matches('[data-vs="effect"],[data-vs="image"],[data-vs="useClip"],[data-vg="voiceOn"]')) {
-    vField(t, v); save.i(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y); drawStill(i);
+  if (t.dataset.blur) { const id = t.dataset.blur; v.blurOff = t.checked ? v.blurOff.filter((x) => x !== id) : [...new Set([...v.blurOff, id])]; vDirty(v); vSaveNow(); drawBlurThumbs(i, v); return; }
+  if (t.matches('[data-vs="role"],[data-vs="move"],[data-vs="fx"],[data-vs="tr"],[data-vs="demo"],[data-vg="style"],[data-vg="own"],[data-vg="ownRecheck"]')) {
+    vField(t, v); vSaveNow(); const y = window.scrollY; renderVideo(true); window.scrollTo(0, y);
   }
 });
 document.addEventListener('input', (e) => {
   const t = e.target; if (!t.closest?.('#v-video')) return;
   const i = vItem(); if (!i) return; const v = V(i);
-  if (t.matches('[data-vs],[data-vg]')) { vField(t, v); vSave(); }
+  if (t.matches('[data-vs],[data-vg],[data-vp]')) { vField(t, v); vSave(); }
 });
 function vField(t, v) {
   const val = t.type === 'checkbox' ? t.checked : t.value;
   if (t.dataset.vs) {
-    const s = v.sections[+t.dataset.k]; if (!s) return; const f = t.dataset.vs;
-    if (f === 'image') { s.image = +val; s.point = null; }
-    else if (f === 'dir') s.dir = +val;
-    else if (f === 'effect') { s.effect = EFFECTS[val] ? val : 'push'; }
-    else s[f] = val;
+    const s = v.plan?.shots[+t.dataset.k]; if (!s) return; const f = t.dataset.vs;
+    if (f === 'start') s.start = Math.max(0, num(val));
+    else if (f === 'dur') s.dur = clamp(num(val) || 3, SHOT_MIN, SHOT_MAX);
+    else if (f === 'demo') s.demo = !!val;
+    else if (f === 'role') s.role = ROLES[val] ? val : 'point';
+    else if (f === 'move') s.move = MOVES[val] ? val : 'push';
+    else if (f === 'fx') s.fx = FXS[val] ? val : 'bounce';
+    else if (f === 'tr') s.tr = TRANS[val] ? val : 'auto';
+    else s[f] = String(val);
+    vDirty(v);
   } else {
     const f = t.dataset.vg;
-    if (f === 'voiceOn') v.voice.on = !!val;
-    else if (f === 'voiceName') v.voice.name = VOICES[val] ? val : 'Kore';
-    else if (f === 'voiceStyle') v.voice.style = String(val).slice(0, 200);
-    else if (f === 'musicVol') v.musicVol = clamp(num(val), 0, 0.4);
-    else if (f === 'seconds') v.seconds = clamp(Math.round(num(val)) || 25, 15, 45);
-    else if (f === 'endTitle' || f === 'endSub') v[f] = String(val);
+    if (f === 'pname') { vItem().name = String(val).slice(0, 60) || '未命名影片'; }
+    else if (f === 'own') v.own = !!val;
+    else if (f === 'desc') { v.desc = String(val).slice(0, 1500); const b = $('#vPlanBtn'); if (b) b.disabled = !(v.src && v.own && v.desc.trim()); }
+    else if (f === 'style') v.style = STYLES[val] ? val : '';
+    else if (f === 'seconds') v.seconds = clamp(Math.round(num(val)) || 17, 14, 19);
+    else if (f === 'cta' && v.plan) { v.plan.cta = String(val).slice(0, 16); vDirty(v); }
+    else if (f === 'tags' && v.plan) { v.plan.hashtags = [...new Set(String(val).split(/[\s,，、]+/).map((x) => x.replace(/^#+/, '')).filter(Boolean).map((x) => `#${x}`))].slice(0, 5); const r = $('#vReport'); if (r) r.textContent = reportText(vItem(), v); }
   }
+}
+
+/* ========== 多行輸入框依內容自動長高（不出現捲軸） ==========
+ * 支援 CSS field-sizing 的瀏覽器（Chrome／Edge）由 CSS 處理；其他瀏覽器（Safari、Firefox）用 JS 調整高度，全站的 textarea 都適用。 */
+const FIELD_SIZING = CSS.supports?.('field-sizing', 'content');
+function autoGrow(t) {
+  if (FIELD_SIZING || !t || t.tagName !== 'TEXTAREA' || !t.isConnected) return;
+  t.style.height = 'auto';
+  t.style.height = `${t.scrollHeight + (t.offsetHeight - t.clientHeight)}px`;
+}
+const growAll = (root = document) => { if (!FIELD_SIZING) root.querySelectorAll('textarea').forEach(autoGrow); };
+document.addEventListener('input', (e) => autoGrow(e.target));
+document.addEventListener('focusin', (e) => autoGrow(e.target));
+if (!FIELD_SIZING) {
+  new MutationObserver(() => { clearTimeout(growAll.t); growAll.t = setTimeout(() => growAll(), 30); })
+    .observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('resize', () => growAll());
 }
 
 /* ========== 掛上路由 ========== */
