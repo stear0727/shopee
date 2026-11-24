@@ -669,9 +669,6 @@ function renderVideo(force) {
     if (!vProjects.length) vProjects.push(newProject());
     vSel = vProjects[vProjects.length - 1].id; store.set('vProjSel', vSel); vSaveNow();
   }
-  const sel = `<div class="card"><h2>1. 影片專案</h2>
-    <p class="hint">把你拍的商品實拍影片剪成 9:16、14–19 秒的特色銷售短影音：依你的提示詞設計風格、分鏡與文案，自動加入轉場，配樂與音效都由程式合成。這是獨立功能，不會使用或修改商品清單；專案與影片只存在這台瀏覽器。</p>
-    <div class="btns"><button type="button" class="pri" data-act="vNewProj">＋ 新增影片專案</button></div></div>`;
   const i = vItem();
   const v = V(i), plan = v.plan;
   if (v.src) ensurePrep(v);
@@ -680,14 +677,14 @@ function renderVideo(force) {
   const ready = v.src && v.own && (v.desc || '').trim();
   const dur = plan ? plan.shots.reduce((t, s) => t + Math.min(SHOT_MAX, Math.max(SHOT_MIN, Number(s.dur) || 3)), 0) : 0;
 
-  const srcCard = `<div class="card"><h2>2. 上傳商品實拍影片</h2>
+  const srcCard = `<div class="card"><h2>1. 上傳商品實拍影片</h2>
     ${v.src ? `<p>🎞 ${esc(v.src.name)}｜${f1(v.src.duration)} 秒｜${v.src.w}×${v.src.h}｜${(v.src.size / 1048576).toFixed(1)} MB <span id="vSrcState" class="muted sm"></span></p><div class="vsrc"><video id="vSrcPrev" controls playsinline muted></video></div><p class="hint">🔇 原始影片的聲音已自動靜音，輸出只使用程式合成的配樂與音效。</p>` : ''}
-    <label class="btn${v.src ? '' : ' pri'}">${v.src ? '更換影片' : '選擇影片檔（MP4／MOV）'}<input class="vh" type="file" accept="video/*" data-vf="src"></label>
+    <div class="btns"><label class="btn${v.src ? '' : ' pri'}">${v.src ? '更換影片' : '選擇影片檔（MP4／MOV）'}<input class="vh" type="file" accept="video/*" data-vf="src"></label>${v.src ? '<button type="button" class="ghost" data-act="vNewProj">清除，重新開始</button>' : ''}</div>
     <p class="hint">影片只存在這台裝置的瀏覽器，不會上傳，也不會傳給 AI。</p>
     <label class="chk"><input type="checkbox" data-vg="own"${v.own ? ' checked' : ''}> 這支影片是我自己拍攝的，或已取得授權</label>
     <div id="vSrcProg" class="vprog-box"></div></div>`;
 
-  const pCard = !v.src ? '' : `<div class="card"><h2>3. 提示詞與分鏡</h2>
+  const pCard = !v.src ? '' : `<div class="card"><h2>2. 提示詞與分鏡</h2>
     <label>提示詞（AI 會分析這段文字來設計風格、分鏡與文案）<textarea rows="5" maxlength="1500" data-vg="desc" placeholder="例如：ecoco 意可可 噴油壺 250ml，高硼硅玻璃瓶身，按壓就噴出細霧，不滴油不掛油，可裝橄欖油、醬油、醋。想要輕鬆有趣的感覺。">${esc(v.desc || '')}</textarea></label>
     <div class="row2"><label>風格<select data-vg="style">${opts(STYLE_OPTS, v.style)}</select></label><label>影片長度（14–19 秒）<input type="number" min="14" max="19" step="1" data-vg="seconds" value="${esc(v.seconds)}"></label></div>
     <div class="btns"><button type="button" class="pri" data-act="vPlan" id="vPlanBtn"${ready ? '' : ' disabled'}>${plan ? 'AI 重新設計分鏡' : 'AI 設計分鏡'}</button>${plan ? '<button type="button" data-act="vAddShot">新增分鏡</button>' : ''}</div>
@@ -696,28 +693,28 @@ function renderVideo(force) {
     ${blocked ? `<div class="valert bad">⛔ 依台灣法規，這類商品不能製作廣告影片：${esc(plan.prohibited.reason)}</div>` : ''}
     ${plan ? planHtml(v, plan, dur) : ''}</div>`;
 
-  const bCard = !v.src ? '' : `<div class="card"><h2>4. 遮蔽（選用）</h2>
+  const bCard = !v.src ? '' : `<div class="card"><h2>3. 遮蔽（選用）</h2>
     <p class="hint">如果畫面裡有價格標籤、日期／有效期限、促銷吊牌、別家商品或卡通角色，請在畫面上框起來，輸出時會全程模糊。</p>
     <div class="vframes" id="vFrames">${(a?.times || []).map((t, k) => `<figure><canvas data-fr="${k}" width="160" height="284"></canvas><figcaption>${f1(t)} 秒</figcaption></figure>`).join('')}</div>
     <ul class="vblur">${v.manualBlur.map((m, k) => `<li><span>🟧 ${esc(m.label)}（全程固定位置）</span> <button type="button" class="ghost" data-act="vBlurDel" data-k="${k}">刪除</button></li>`).join('') || '<li class="muted">目前沒有模糊框。</li>'}</ul>
     <div class="btns"><button type="button" data-act="vBlurAdd">＋ 加模糊框</button></div></div>`;
 
-  const kCard = !plan ? '' : `<div class="card"><h2>5. 關鍵畫面檢查</h2>
+  const kCard = !plan ? '' : `<div class="card"><h2>4. 關鍵畫面檢查</h2>
     <p class="hint">先輸出每個分鏡的關鍵畫面，檢查文字重疊、超出範圍與模糊有沒有遮到；確認沒問題才能輸出完整影片。</p>
     <div class="btns"><button type="button" class="pri" data-act="vKeys"${blocked ? ' disabled' : ''}>產生關鍵畫面</button></div>
     <div id="vKeyProg" class="vprog-box"></div><div id="vKeys" class="vkeys"></div>
     <div class="btns"><button type="button" data-act="vKeysOk" id="vKeysOk"${v.checked ? '' : ' hidden'} disabled>✓ 已確認</button></div></div>`;
 
-  const oCard = !plan ? '' : `<div class="card"><h2>6. 預覽與輸出</h2>
+  const oCard = !plan ? '' : `<div class="card"><h2>5. 預覽與輸出</h2>
     <div class="vstage"><canvas id="vCanvas" width="${VW}" height="${VH}" aria-label="影片預覽"></canvas></div>
     <div class="btns"><button type="button" data-act="vPlay"${blocked ? ' disabled' : ''}>▶ 預覽</button><button type="button" class="ghost" data-act="vStop">■ 停止</button><button type="button" class="pri" data-act="vRender"${v.checked && !blocked ? '' : ' disabled'}>輸出 MP4</button></div>
-    ${v.checked ? '' : '<p class="hint warn">請先完成「5. 關鍵畫面檢查」並確認版面。</p>'}
+    ${v.checked ? '' : '<p class="hint warn">請先完成「4. 關鍵畫面檢查」並確認版面。</p>'}
     <p class="hint">輸出 1080×1920、30fps。輸出是即時錄製，影片多長就要錄多久，錄製時請停留在這個分頁；第一次輸出會先暖機約 4 秒。</p>
     <div id="vRenderProg" class="vprog-box"></div><div id="vOut"></div>
     <h3>交付說明</h3><div class="pre vreport" id="vReport">${esc(reportText(i, v))}</div>
     <div class="btns"><button type="button" data-act="vCopyReport">複製交付說明</button></div></div>`;
 
-  $('#vidBody').innerHTML = sel + srcCard + pCard + bCard + kCard + oCard;
+  $('#vidBody').innerHTML = srcCard + pCard + bCard + kCard + oCard;
   if (v.src) srcURL(i).then((u) => { const p = $('#vSrcPrev'), s = $('#vSrcState'); if (u && p) { forceMute(p); p.src = u; } else if (s) s.textContent = '（這台裝置上沒有這支影片，請按「更換影片」重新選擇同一支影片）'; });
   if (a) drawBlurThumbs(i, v);
   if (plan) drawStill(i);
@@ -1020,7 +1017,7 @@ Object.assign(ACT, {
   async vNewProj() {
     if (vBusy) { toast('目前有其他工作進行中'); return; }
     const cur = vItem();
-    if (cur?.video?.src && !confirm('新增專案會清除目前的影片、提示詞與分鏡，確定？')) return;
+    if (cur?.video?.src && !confirm('重新開始會清除目前的影片、提示詞與分鏡，確定？')) return;
     vStopAll();
     // 只保留一個專案：舊專案與存在這台裝置的影片一併清除
     for (const p of vProjects) await IDB.del(p.id).catch(() => {});
