@@ -397,7 +397,7 @@ function renderAnalyze(j, p) {
   const aff = safeUrl(p.aff) ? p.aff : '';
   if (aff) outText.aff = aff;
   const brU = brLive(p) ? bridgeUrl(p) : '';
-  if (brU) outText.bridge = brU;
+  if (brU) outText.bridge = bridgeShareUrl(p);
   const affH = (aff ? `<h3>分潤連結</h3><div class="post"><p>${esc(aff)}</p><button type="button" data-act="copy" data-k="aff">複製</button></div>` : '')
     + (brU ? `<h3>橋接網址（貼文用，顯示美編預覽卡片）</h3><div class="post"><p>${esc(brU)}</p><button type="button" data-act="copy" data-k="bridge">複製</button></div>` : '');
   if (o && typeof o === 'object' && !Array.isArray(o)) {
@@ -429,7 +429,7 @@ function renderAnalyze(j, p) {
     ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
     const ls = (a) => (Array.isArray(a) ? a.map(aiTxt).filter(Boolean).map((x) => `- ${x}`).join('\n') : '');
-    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}${aff ? `分潤連結\n${aff}\n\n` : ''}${brU ? `橋接網址\n${brU}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}${aff ? `分潤連結\n${aff}\n\n` : ''}${brU ? `橋接網址\n${bridgeShareUrl(p)}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>${affH}`; t = j.text + (aff ? `\n\n分潤連結：${aff}` : '') + `\n\nSub_id：${sub}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
   return outCard('analyze', h, j, t);
@@ -615,6 +615,8 @@ const okDest = (u) => { try { const x = new URL(String(u)); return (x.protocol =
 // 自訂網址（中文標題）：只留中英文、數字與 -，空白轉 -，最多 30 字；不能跟 8 碼代碼同格式
 const slugify = (s) => [...String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}-]+/gu, '').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '')].slice(0, 30).join('').replace(/-+$/, '');
 const bridgeUrl = (i) => (!i?.bridge?.code ? '' : i.bridge.slug ? `${location.origin}/${i.bridge.slug}` : `${location.origin}/s/${i.bridge.code}`);
+// 複製用：中文編碼成 %XX（Facebook 等平台碰到中文會把網址截斷，只剩首頁、沒有預覽圖）
+const bridgeShareUrl = (i) => (!i?.bridge?.code ? '' : i.bridge.slug ? `${location.origin}/${encodeURIComponent(i.bridge.slug)}` : `${location.origin}/s/${i.bridge.code}`);
 const brLive = (i) => !!i?.bridge?.code;
 async function bridgeApi(body, btn) {
   const h = { 'Content-Type': 'application/json' }; if (S.accessCode) h['x-access-code'] = S.accessCode;
@@ -1191,7 +1193,7 @@ async function renderStats(refetch = true) {
       <h3>${esc(i.name)}</h3>
       <div class="stat-n"><div class="hl"><span>${esc(lab)}</span><b>${fmt(range)}</b></div>${cardKs.map((k) => `<div><span>${NM[k]}</span><b>${fmt(r[k])}</b></div>`).join('')}</div>
       <div class="pc-row sm"><span class="muted brurl">${esc(bridgeUrl(i).replace(/^https?:\/\//, ''))}</span></div>
-      <div class="acts"><button type="button" data-act="brCopyUrl" data-u="${esc(bridgeUrl(i))}">複製橋接網址</button><button type="button" class="ghost" data-act="statDel" data-c="${esc(c)}" data-n="${esc(i.name)}">刪除</button></div>
+      <div class="acts"><button type="button" data-act="brCopyUrl" data-u="${esc(bridgeShareUrl(i))}">複製橋接網址</button><button type="button" class="ghost" data-act="statDel" data-c="${esc(c)}" data-n="${esc(i.name)}">刪除</button></div>
     </article>`; }).join('')}</div>`;
   $$('#statsBody [data-w]').forEach((e) => { e.style.width = `${e.dataset.w}%`; });
   $$('#statsBody [data-h]').forEach((e) => { e.style.height = `${e.dataset.h}%`; });
@@ -1557,7 +1559,7 @@ const ACT = {
   brPhotoDel() { const d = $('#dlg'); d._brImg = null; d._brOrig = null; d._brPhoto = null; const f = $('#brPhoto'); if (f) f.value = ''; d._brRedraw?.(); },
   brMock(b) { const d = $('#dlg'); d._brMock = b.dataset.m; $$('[data-act="brMock"]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); const i = items.find((x) => x.id === $('[data-act="brSave"]')?.dataset.id); if (i) brMockDraw(i); },
   brCopyUrl(b) { if (b.dataset.u) copy(b.dataset.u, b); },
-  brCopy(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && brLive(i)) copy(bridgeUrl(i), b); },
+  brCopy(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && brLive(i)) copy(bridgeShareUrl(i), b); },
   statsRefresh() { renderStats(); },
   statRange(b) {
     statRange = b.dataset.r;
