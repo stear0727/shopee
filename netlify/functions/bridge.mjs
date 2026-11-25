@@ -38,7 +38,11 @@ const PAGE_HEADERS = {
 async function countClick(st, code) {
   const key = `c/${code}`, cur = (await st.get(key, { type: 'json' })) || { total: 0, days: {} }, d = twDay();
   cur.total = (cur.total || 0) + 1; cur.days = cur.days || {}; cur.days[d] = (cur.days[d] || 0) + 1; cur.last = Date.now();
+  // 每天各小時（台灣時間 0–23 點）的點擊數，用來看哪個時段最多人點
+  const hr = new Date(Date.now() + 8 * 3600e3).getUTCHours(); cur.hrs = cur.hrs || {};
+  const arr = Array.isArray(cur.hrs[d]) && cur.hrs[d].length === 24 ? cur.hrs[d] : new Array(24).fill(0); arr[hr] = (arr[hr] || 0) + 1; cur.hrs[d] = arr;
   const keep = Object.keys(cur.days).sort().slice(-120); cur.days = Object.fromEntries(keep.map((k) => [k, cur.days[k]]));
+  cur.hrs = Object.fromEntries(Object.keys(cur.hrs).sort().slice(-120).map((k) => [k, cur.hrs[k]]));
   await st.setJSON(key, cur);
 }
 
@@ -189,9 +193,13 @@ async function handle(req, context) {
     await Promise.all([...groups.values()].map(async (g) => {
       g.sort((x, y) => (y.at || 0) - (x.at || 0));
       const cs = await Promise.all(g.map((r) => st.get(`c/${r.code}`, { type: 'json' })));
-      const days = {}; let total = 0, last = 0;
-      for (const s of cs) { if (!s) continue; total += s.total || 0; last = Math.max(last, s.last || 0); for (const [d, n] of Object.entries(s.days || {})) days[d] = (days[d] || 0) + n; }
-      out[g[0].code] = { total, days, last, title: g[0].title, kind: g[0].kind, at: g[0].at, slug: g[0].slug, codes: g.map((r) => r.code) };
+      const days = {}, hrs = {}; let total = 0, last = 0;
+      for (const s of cs) {
+        if (!s) continue; total += s.total || 0; last = Math.max(last, s.last || 0);
+        for (const [d, n] of Object.entries(s.days || {})) days[d] = (days[d] || 0) + n;
+        for (const [d, a] of Object.entries(s.hrs || {})) if (Array.isArray(a)) { const t = hrs[d] || (hrs[d] = new Array(24).fill(0)); a.forEach((n, k) => { if (k < 24) t[k] += +n || 0; }); }
+      }
+      out[g[0].code] = { total, days, hrs, last, title: g[0].title, kind: g[0].kind, at: g[0].at, slug: g[0].slug, codes: g.map((r) => r.code) };
     }));
     return json(200, { ok: true, stats: out, today: twDay() });
   }

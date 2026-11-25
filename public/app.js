@@ -1148,6 +1148,13 @@ function statCharts(rows, j, inR, lab) {
   const wk = [0, 0, 0, 0, 0, 0, 0]; for (const [d, n] of Object.entries(agg)) if (inR(d)) wk[new Date(d + 'T00:00:00Z').getUTCDay()] += n;
   const wn = ['日', '一', '二', '三', '四', '五', '六'], wmx = Math.max(1, ...wk);
   const trendNote = statRange === 'today' ? '（今日只有一天，趨勢顯示近 7 天）' : '';
+  // 時段：區間內每小時點擊數，以及星期 × 時段熱度
+  const hr = new Array(24).fill(0), hm = Array.from({ length: 7 }, () => new Array(24).fill(0)); let hrSum = 0;
+  for (const r of rows) for (const [d, a] of Object.entries(r.s.hrs || {})) if (inR(d) && Array.isArray(a)) { const w = new Date(d + 'T00:00:00Z').getUTCDay(); a.forEach((n, k) => { n = +n || 0; if (k < 24 && n) { hr[k] += n; hm[w][k] += n; hrSum += n; } }); }
+  const hmx = Math.max(1, ...hr), mmx = Math.max(1, ...hm.flat()), hpk = hr.indexOf(Math.max(...hr));
+  const hh = (k) => `${String(k).padStart(2, '0')}:00`;
+  const top3 = hr.map((v, k) => [v, k]).filter(([v]) => v).sort((a, b) => b[0] - a[0]).slice(0, 3).map(([v, k]) => `${hh(k)}–${hh((k + 1) % 24)}（${fmt(v)} 次）`);
+  const hrNote = '<p class="muted sm">時段資料從 2026/11/25 開始記錄，之前的點擊沒有時間資訊。</p>';
   return `<div class="ch-grid2">
     <section class="card ch ch-wide"><h2 class="ch-h">每日點擊趨勢 <span class="muted sm">${mdd(days[0])} ～ ${mdd(days[days.length - 1])}${trendNote}</span></h2>
       <p class="ch-kpi sm muted">合計 <b>${fmt(tsum)}</b> 次 · 日平均 <b>${avg.toFixed(1)}</b> 次 · 最高 <b>${peak && agg[peak] ? `${mdd(peak)}（${fmt(agg[peak])} 次）` : '—'}</b></p>
@@ -1159,6 +1166,15 @@ function statCharts(rows, j, inR, lab) {
       <ul class="ch-leg"><li><i class="c1"></i>🛍️ 商品 <b>${fmt(it)}</b> 次（${pct(it)}%）</li><li><i class="c2"></i>🏪 賣場 <b>${fmt(sh)}</b> 次（${pct(sh)}%）</li></ul>` : '<p class="muted sm">這段期間還沒有點擊</p>'}</section>
     <section class="card ch"><h2 class="ch-h">星期分布 <span class="muted sm">${esc(lab)}</span></h2>
       <div class="ch-cols" role="img" aria-label="${wn.map((w, k) => `星期${w} ${wk[k]} 次`).join('，')}">${wk.map((v, k) => `<div title="星期${wn[k]}：${fmt(v)} 次"><b>${v ? fmt(v) : ''}</b><span class="ch-col"><span data-h="${v ? Math.max(3, (v / wmx) * 100).toFixed(1) : 0}"></span></span><span class="ch-ax2">${wn[k]}</span></div>`).join('')}</div></section>
+    <section class="card ch ch-wide"><h2 class="ch-h">點擊時段分布 <span class="muted sm">${esc(lab)}・台灣時間</span></h2>
+      ${hrSum ? `<p class="ch-kpi sm muted">最熱門時段 <b>${top3.join('、')}</b></p>
+      <div class="ch-cols ch-cols24" role="img" aria-label="${hr.map((v, k) => `${k} 點 ${v} 次`).join('，')}">${hr.map((v, k) => `<div title="${hh(k)}–${hh((k + 1) % 24)}：${fmt(v)} 次"${k === hpk ? ' class="pk"' : ''}><b>${v && v === hr[hpk] ? fmt(v) : ''}</b><span class="ch-col"><span data-h="${v ? Math.max(3, (v / hmx) * 100).toFixed(1) : 0}"></span></span><span class="ch-ax2">${k % 3 === 0 ? k : ''}</span></div>`).join('')}</div>` : '<p class="muted sm">這段期間還沒有時段資料</p>'}${hrNote}</section>
+    <section class="card ch ch-wide"><h2 class="ch-h">星期 × 時段熱度 <span class="muted sm">${esc(lab)}・顏色越深點擊越多</span></h2>
+      ${hrSum ? `<div class="hm" role="table" aria-label="星期與時段的點擊熱度">
+        <div class="hm-r hm-hd" role="row"><span role="columnheader"></span>${hr.map((_, k) => `<span role="columnheader">${k % 3 === 0 ? k : ''}</span>`).join('')}</div>
+        ${[1, 2, 3, 4, 5, 6, 0].map((w) => `<div class="hm-r" role="row"><span role="rowheader">${wn[w]}</span>${hm[w].map((v, k) => `<i role="cell" title="星期${wn[w]} ${hh(k)}–${hh((k + 1) % 24)}：${fmt(v)} 次"${v ? ` data-a="${(0.15 + 0.85 * (v / mmx)).toFixed(2)}"` : ' class="z"'}></i>`).join('')}</div>`).join('')}
+        <div class="hm-leg sm muted"><span>少</span><i data-a="0.15"></i><i data-a="0.45"></i><i data-a="0.75"></i><i data-a="1"></i><span>多</span></div>
+      </div>` : '<p class="muted sm">這段期間還沒有時段資料</p>'}</section>
   </div>`;
 }
 async function renderStats(refetch = true) {
@@ -1199,6 +1215,7 @@ async function renderStats(refetch = true) {
   $$('#statsBody [data-w]').forEach((e) => { e.style.width = `${e.dataset.w}%`; });
   $$('#statsBody [data-h]').forEach((e) => { e.style.height = `${e.dataset.h}%`; });
   $$('#statsBody [data-f]').forEach((e) => { e.style.flex = `${e.dataset.f} 1 0`; });
+  $$('#statsBody [data-a]').forEach((e) => { e.style.opacity = e.dataset.a; });
 }
 
 let catSel = 'all', gradeSel = 'all', shownIds = [];

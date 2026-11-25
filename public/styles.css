@@ -427,3 +427,16 @@ input[aria-invalid="true"]{border-color:#c0392b;outline-color:#c0392b}
 .br-adj p{margin:4px 0}
 .add-g{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 @media (max-width:520px){.add-g{grid-template-columns:1fr}}
+/* 時段分布與熱度圖 */
+.ch-cols24{grid-template-columns:repeat(24,1fr);gap:2px;height:160px}
+.ch-cols24>div{font-size:.7rem}
+.ch-cols24 .ch-col{width:80%;max-width:20px}
+.ch-cols24 .pk .ch-col span{background:var(--c2)}
+.hm{display:grid;gap:2px;overflow-x:auto}
+.hm-r{display:grid;grid-template-columns:28px repeat(24,minmax(10px,1fr));gap:2px;align-items:center}
+.hm-r span{font-size:.7rem;color:var(--mut);text-align:center}
+.hm-r i{display:block;height:20px;border-radius:3px;background:var(--c1)}
+.hm-r i.z{background:var(--line);opacity:.45}
+.hm-leg{display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:6px}
+.hm-leg i{display:inline-block;width:16px;height:12px;border-radius:3px;background:var(--c1)}
+.ch-cols>div>b,.ch-cols .ch-ax2{display:block;min-height:1.25em;line-height:1.25em}
