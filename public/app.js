@@ -435,7 +435,7 @@ function renderAnalyze(j, p) {
   return outCard('analyze', h, j, t);
 }
 // 把 AI 文案結果存到商品上（單件與批次共用），回傳顯示用的 HTML
-const copyReq = (i, want, fest) => isShop(i) ? { kind: 'shop', name: i.name, platform: 'fb', wantFest: want && !!fest, festival: fest } : ({ name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest });
+const copyReq = (i, want, fest) => isShop(i) ? { kind: 'shop', name: i.name, platform: 'fb', wantFest: want && !!fest, festival: fest } : i.manual ? { name: i.name, category: i.category === '未分類' ? '' : i.category, price: num(i.price) || undefined, platform: i.platform, wantFest: want && !!fest, festival: fest } : ({ name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest });
 function applyCopy(i, j, want, fest) {
   const html = renderAnalyze(j, i);
   i.aiText = String(outText.analyze || '').slice(0, 8000);
@@ -501,7 +501,7 @@ function renderPub() {
   pubShown = arr.map((i) => i.id);
   $('#pubQueue').innerHTML = arr.length ? arr.map(pubRow).join('')
     : all.length ? `<p class="empty">沒有${pubSel === 'done' ? '已發布' : '待發布'}的${pubKind === 'shop' ? '賣場' : '商品'}。</p>`
-    : pubKind === 'shop' ? '<p class="empty">賣場清單是空的。按「＋新增賣場」填入賣場名稱與分潤連結，AI 會幫你產生文案。</p>'
+    : pubKind === 'shop' ? '<p class="empty">賣場清單是空的。按「＋新增」選擇賣場，填入賣場名稱與分潤連結，AI 會幫你產生文案。</p>'
     : '<p class="empty">發布清單是空的。到「<a href="#list">商品</a>」勾選商品後按「加入發布清單」。</p>';
   updPubBtns();
 }
@@ -546,8 +546,8 @@ function pubRow(i) {
     <div class="pc-top"><span><label class="pick"><input type="checkbox" data-ppick="${id}"${pubPicked.has(i.id) ? ' checked' : ''} aria-label="選取 ${esc(i.name)}"></label>${done ? '<span class="tag pubtag">✓ 已發布</span> ' : ''}<span class="cat ${catClass(i.category)}">${esc(i.category || '未分類')}</span></span><span class="muted sm">${esc(i.shop || '')}</span></div>
     <h3>${esc(i.name)}</h3>
     <div class="pc-row"><span>${num(i.price) ? `<b class="price">$${fmt(num(i.price))}</b>` : ''}</span><span class="muted">${num(i.sales) ? `月銷 ${kfmt(num(i.sales))}` : ''}</span></div>
-    <div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${bonus()}%</span></div>
-    <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${safeUrl(i.url) ? `<a href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</span></div>
+    ${i.manual ? '<div class="pc-row sm"><span class="tag">手動新增</span></div>' : `<div class="pc-row comm"><span>預估社群分潤 <b>$${fmt(commOf(i), 1)}</b></span><span class="muted sm">分潤率 ${fmt(num(i.base) + num(i.xtra), 1)}%＋${bonus()}%</span></div>
+    <div class="pc-row sm"><span>評分 <b>${fmt(i.total, 1)}</b> <span class="grade g${i.grade}">${i.grade}</span></span><span>${safeUrl(i.url) ? `<a href="${esc(safeUrl(i.url))}" target="_blank" rel="noopener noreferrer">來源</a>` : ''}</span></div>`}
     <div class="pc-row"><span class="sm ${done ? 'pubok' : 'muted'}">${done ? `✓ 已發布｜${fmtDT(i.publishedAt) || '時間未記錄'}` : `${STATUS[i.status]}｜加入於 ${fmtDT(i.queuedAt || i.createdAt)}`}</span></div>
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
     ${pubTimeHtml(i)}
@@ -582,13 +582,18 @@ function shopRow(i) {
     </div>
   </article>`;
 }
-// 新增賣場：和卡片的「產生文案」視窗相同，多了賣場名稱（給 AI 參考）與分潤連結
-function shopDlg() {
-  const d = $('#dlg');
-  d.innerHTML = `<div class="dlg-head"><h2>＋新增賣場｜產生文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+// ＋新增（商品／賣場）：和卡片的「產生文案」視窗相同，多了名稱（給 AI 參考）與分潤連結（不會傳給 AI）
+function shopDlg(kind) {
+  const d = $('#dlg'), k = kind === 'item' ? 'item' : 'shop', isS = k === 'shop';
+  d._addKind = k;
+  d.innerHTML = `<div class="dlg-head"><h2>＋新增${isS ? '賣場' : '商品'}｜產生文案</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+    <div class="tabs cat-tabs" role="tablist" aria-label="要新增的種類"><button type="button" role="tab" data-act="addKind" data-k="item" aria-selected="${!isS}">🛍️ 商品</button><button type="button" role="tab" data-act="addKind" data-k="shop" aria-selected="${isS}">🏪 賣場</button></div>
     <form id="shopForm" novalidate>
-      <label>賣場名稱（提供給 AI 參考）<input id="shopName" maxlength="200" autocomplete="off" placeholder="例如：花漾美肌旗艦店" aria-describedby="shopNameErr"></label>
+      <label>${isS ? '賣場' : '商品'}名稱（提供給 AI 參考）<input id="shopName" maxlength="200" autocomplete="off" placeholder="${isS ? '例如：花漾美肌旗艦店' : '例如：多功能玻璃噴油瓶 250ml'}" aria-describedby="shopNameErr"></label>
       <p id="shopNameErr" class="ferr" role="alert" hidden></p>
+      ${isS ? '' : `<div class="add-g"><label>價格（選填，提供給 AI 參考）<input id="addPrice" type="number" inputmode="decimal" min="0" step="1" placeholder="例如：299"></label>
+      <label>分類（選填，提供給 AI 參考）<input id="addCat" maxlength="40" list="addCatList" autocomplete="off" placeholder="例如：廚房用品"><datalist id="addCatList">${[...new Set(items.filter((x) => !isShop(x) && x.category).map((x) => x.category))].slice(0, 60).map((c) => `<option value="${esc(c)}">`).join('')}</datalist></label></div>
+      <p id="addPriceErr" class="ferr" role="alert" hidden></p>`}
       <label>分潤連結<input id="shopUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://" aria-describedby="shopUrlErr"></label>
       <p id="shopUrlErr" class="ferr" role="alert" hidden></p>
       ${festForm()}
@@ -603,11 +608,13 @@ function dropShops(ids) { items = items.filter((x) => !ids.has(x.id)); for (cons
 
 
 /* ========== 橋接頁（Threads 等平台的預覽卡片；真人點進來立刻轉到蝦皮） ==========
- * i.bridge：{ code, at, title, head, sub, desc, tpl }；網址為 /s/<code>，建立後永久有效（沒有停用）
+ * i.bridge：{ code, at, title, head, sub, desc, style, photo, photoOnly, fit, slug }；網址為 /<slug> 或 /s/<code>，建立後永久有效（沒有停用）
  */
 const SHOPEE_HOST = /(^|\.)shopee\.(tw|com|sg|ph|vn|com\.my|co\.th|co\.id|com\.br|com\.mx|com\.co|cl)$|^(shp\.ee|shope\.ee)$/i;
 const okDest = (u) => { try { const x = new URL(String(u)); return (x.protocol === 'https:' || x.protocol === 'http:') && SHOPEE_HOST.test(x.hostname); } catch { return false; } };
-const bridgeUrl = (i) => (i?.bridge?.code ? `${location.origin}/s/${i.bridge.code}` : '');
+// 自訂網址（中文標題）：只留中英文、數字與 -，空白轉 -，最多 30 字；不能跟 8 碼代碼同格式
+const slugify = (s) => [...String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}-]+/gu, '').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '')].slice(0, 30).join('').replace(/-+$/, '');
+const bridgeUrl = (i) => (!i?.bridge?.code ? '' : i.bridge.slug ? `${location.origin}/${i.bridge.slug}` : `${location.origin}/s/${i.bridge.code}`);
 const brLive = (i) => !!i?.bridge?.code;
 async function bridgeApi(body, btn) {
   const h = { 'Content-Type': 'application/json' }; if (S.accessCode) h['x-access-code'] = S.accessCode;
@@ -632,64 +639,411 @@ function bridgeHtml(i) {
 const noTags = (s) => String(s || '').replace(/#[^\s#]+/g, '').replace(/\s+/g, ' ').trim();
 function brSrc(i) {
   const o = i.aiData?.json || {}, arr = (a) => (Array.isArray(a) ? a : []).map(aiTxt).map((x) => x.trim()).filter(Boolean);
-  return { heads: arr(o.headlines || o.hooks).map(noTags), posts: arr(o.posts) };
+  // 可選的文案：吸睛第一句、節慶活動文案、短貼文（大字取各貼文的第一行）
+  const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' ? o.festivalPost.post.trim() : '';
+  const fg = `🎉 節慶活動文案${o.festivalPost?.festival ? `・${aiTxt(o.festivalPost.festival)}` : ''}`;
+  const first = (t) => (lineify(t).split('\n').map((x) => noTags(x).trim()).find(Boolean) || '').replace(/[。，,、]+$/, '');
+  const posts = arr(o.posts);
+  const H = [...arr(o.headlines || o.hooks).map((t) => ['💡 吸睛第一句', noTags(t)]), ...(fp ? [[fg, first(fp)]] : []), ...posts.map((t) => ['📝 短貼文', first(t)])];
+  const seen = new Set(), Hd = H.filter(([, t]) => t && !seen.has(t) && seen.add(t));
+  const Pp = [...(fp ? [[fg, fp]] : []), ...posts.map((t) => ['📝 短貼文', t])];
+  return { heads: Hd.map((x) => x[1]), hg: Hd.map((x) => x[0]), posts: Pp.map((x) => x[1]), pg: Pp.map((x) => x[0]) };
+}
+// 下拉選單依來源分組
+function brOpts(arr, groups, f) {
+  let html = '', cur = null;
+  arr.forEach((t, k) => {
+    if (groups[k] !== cur) { if (cur !== null) html += '</optgroup>'; cur = groups[k]; html += `<optgroup label="${esc(cur)}">`; }
+    html += `<option value="${k}">${esc([...f(t)].slice(0, 34).join(''))}</option>`;
+  });
+  return html + (cur !== null ? '</optgroup>' : '');
 }
 // 短文案精華：去掉 hashtag，取前面幾句，約 40 字
+// 每句話一行：在！？。後斷行（句尾表情跟著前一句），中文後面的空白也視為斷句；行尾不留「。」「，」
+function brLines(s) {
+  let t = String(s || '').replace(/\r/g, '');
+  t = t.replace(new RegExp(`([。！？!?]+(?:${EMO})*)[ \t\u3000]*`, 'gu'), '$1\n');
+  t = t.replace(/([^\x00-\x7F])[ \t\u3000]+(?=[^\x00-\x7F\s])/g, '$1\n');
+  const out = [];
+  for (let l of t.split('\n')) {
+    l = l.trim().replace(new RegExp(`[。，,、]+((?:\s*${EMO})*)$`, 'u'), '$1').trim(); if (!l) continue;
+    if (out.length && new RegExp(`^(?:${EMO}|\s)+$`, 'u').test(l)) out[out.length - 1] += l; else out.push(l);
+  }
+  return out.join('\n');
+}
+// 小字精華：去掉 hashtag，取前面幾句（約 45 字），每句一行
 function brShort(s) {
-  // 圖上文字同樣不留句尾的「。」「，」
-  const t = noTags(s).replace(/[。]+\s*/g, ' ').replace(/[，,、]+\s*$/, '').trim(); if ([...t].length <= 40) return t;
-  let out = ''; for (const part of t.split(/(?<=[！？!?\s])/)) { if ([...(out + part)].length > 40) break; out += part; }
-  out = out.trim();
-  return out || [...t].slice(0, 39).join('') + '…';
+  const L = brLines(noTags(String(s || '').replace(/\n+/g, ' \n'))).split('\n').filter(Boolean), out = []; let n = 0;
+  for (const l of L) { const k = [...l].length; if (out.length && n + k > 45) break; out.push(l); n += k; }
+  return out.join('\n');
 }
 // 預覽圖模板（1200×630）
+// 圖片以「裁切填滿」方式畫進指定區域
+function brCover(x, img, dx, dy, dw, dh) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height; if (!iw || !ih) return;
+  const s = Math.max(dw / iw, dh / ih), sw = dw / s, sh = dh / s;
+  x.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, dx, dy, dw, dh);
+}
+const brEdgeC = new WeakMap();
+function brEdgeColor(img) {
+  if (brEdgeC.has(img)) return brEdgeC.get(img);
+  let col = '#f3f4f6';
+  try {
+    const N = 24, c = document.createElement('canvas'); c.width = c.height = N;
+    const x = c.getContext('2d'); x.drawImage(img, 0, 0, N, N);
+    const d = x.getImageData(0, 0, N, N).data; let r = 0, g = 0, b = 0, n = 0;
+    for (let yy = 0; yy < N; yy++) for (let xx = 0; xx < N; xx++) if (xx < 2 || yy < 2 || xx >= N - 2 || yy >= N - 2) { const k = (yy * N + xx) * 4; r += d[k]; g += d[k + 1]; b += d[k + 2]; n++; }
+    col = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`;
+  } catch {}
+  brEdgeC.set(img, col); return col;
+}
+function brContain(x, img, dx, dy, dw, dh) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height; if (!iw || !ih) return;
+  // 空白處用圖片邊緣的平均色補滿（純色，只看得到一張圖）
+  x.save(); x.beginPath(); x.rect(dx, dy, dw, dh); x.clip();
+  x.fillStyle = brEdgeColor(img); x.fillRect(dx, dy, dw, dh);
+  const s = Math.min(dw / iw, dh / ih), w = iw * s, h = ih * s;
+  x.drawImage(img, dx + (dw - w) / 2, dy + (dh - h) / 2, w, h);
+  x.restore();
+}
+// ---- 預覽圖模板（10 種）：圖片放在獨立區塊、不加暗色遮罩，文字放在純色區，兩者都清楚 ----
+const BR_STYLES = [
+  ['classic', '經典暖色'], ['fresh', '清爽藍白'], ['magazine', '雜誌深色'], ['polaroid', '拍立得'], ['caption', '下方字幕'],
+  ['circle', '圓形主圖'], ['pop', '撞色普普'], ['minimal', '極簡黑白'], ['float', '浮起卡片'], ['festive', '節慶紅金'],
+  ['headline', '橫式・上字下圖'], ['cinema', '橫式・電影寬螢幕'], ['newspaper', '橫式・報紙頭條'], ['banner', '橫式・漸層橫幅'], ['ticket', '橫式・票券'],
+];
+const BR_F = '"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif';
+function brRR(x, a, b, w, h, r) { r = Math.min(r, w / 2, h / 2); x.beginPath(); x.moveTo(a + r, b); x.arcTo(a + w, b, a + w, b + h, r); x.arcTo(a + w, b + h, a, b + h, r); x.arcTo(a, b + h, a, b, r); x.arcTo(a, b, a + w, b, r); x.closePath(); }
+function brWrap(x, t, font, maxW, maxLines) {
+  x.font = font; const out = []; let cur = '';
+  // 標點不放行首（，。！？等）：換行時把前一個字一起帶到下一行
+  const noStart = /[，。、！？：；,.!?:;」』）)〉》…～~％%]/;
+  for (const ch of [...String(t || '')]) {
+    if (ch === '\n') { out.push(cur); cur = ''; continue; }
+    if (x.measureText(cur + ch).width > maxW && cur) {
+      const cs = [...cur];
+      if (noStart.test(ch) && cs.length > 1) { const last = cs.pop(); out.push(cs.join('')); cur = last + ch; } else { out.push(cur); cur = ch; }
+    } else cur += ch;
+  }
+  if (cur) out.push(cur);
+  // 避免最後一行只剩 1 個字：從上一行挪 1 個字下來
+  const n = out.length; if (n >= 2 && n <= maxLines && [...out[n - 1]].length === 1) { const pv = [...out[n - 2]]; out[n - 1] = pv.pop() + out[n - 1]; out[n - 2] = pv.join(''); }
+  if (out.length > maxLines) { out.length = maxLines; let l = out[maxLines - 1]; while (l && x.measureText(l + '…').width > maxW) l = [...l].slice(0, -1).join(''); out[maxLines - 1] = l + '…'; }
+  return out;
+}
+// 把圖片放進區域：自動縮放／填滿為基準，再套用使用者的縮放與位置；去背後的空白用模板底色
+function brPlace(x, o, r, ph) {
+  const img = o.img, iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height; if (!iw || !ih) return;
+  const a = o.adj || {}, z = a.z || 1, px = a.px || 0, py = a.py || 0;
+  if (a.cut) { const g = x.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h); g.addColorStop(0, ph[0]); g.addColorStop(1, ph[1]); x.fillStyle = g; }
+  else x.fillStyle = brEdgeColor(img);
+  x.fillRect(r.x, r.y, r.w, r.h);
+  const s0 = o.fit === 'cover' ? Math.max(r.w / iw, r.h / ih) : Math.min(r.w / iw, r.h / ih), w = iw * s0 * z, h = ih * s0 * z;
+  const mx = Math.max(Math.abs(r.w - w) / 2, r.w * 0.25), my = Math.max(Math.abs(r.h - h) / 2, r.h * 0.25);
+  x.drawImage(img, r.x + (r.w - w) / 2 + px * mx, r.y + (r.h - h) / 2 + py * my, w, h);
+}
+// 圖片區：有圖就放進去；沒圖就畫柔和底色＋大圖示當佔位
+function brPic(x, o, r, rad, ph) {
+  x.save(); brRR(x, r.x, r.y, r.w, r.h, rad); x.clip();
+  if (o.img) brPlace(x, o, r, ph);
+  else {
+    const g = x.createLinearGradient(r.x, r.y, r.x + r.w, r.y + r.h); g.addColorStop(0, ph[0]); g.addColorStop(1, ph[1]); x.fillStyle = g; x.fillRect(r.x, r.y, r.w, r.h);
+    x.font = `${Math.round(Math.min(r.w, r.h) * 0.36)}px ${BR_F}`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(o.kind === 'shop' ? '🏪' : '🛍️', r.x + r.w / 2, r.y + r.h / 2);
+  }
+  x.restore();
+}
+// 文字區：大字＋小字垂直置中，放不下時自動縮小字級；名稱固定在區塊底部
+function brTxt(x, o, B, st) {
+  st = o.hideName ? { ...st, noName: true } : st;
+  const al = st.align || 'left', tx = al === 'center' ? B.x + B.w / 2 : B.x, barH = st.bar && o.head ? 34 : 0;
+  // 名稱：完整顯示，太長就縮字、換行
+  let nf = 28, nl = [];
+  if (!st.noName) for (;; nf -= 2) { nl = brWrap(x, `${o.kind === 'shop' ? '🏪' : '🛍️'} ${o.name || ''}`, `700 ${nf}px ${BR_F}`, B.w, 99); if (nl.length <= (B.h < 200 ? 1 : 2) || nf <= 16) break; }
+  const nameH = st.noName ? 0 : nl.length * nf * 1.3 + 12;
+  // 大字、小字：全部放進去，放不下就等比例縮小（不截斷）
+  const h0 = st.hs || 68, r = (st.ss || 36) / h0;
+  let hs = h0, ss, hl, sl, tot;
+  for (;;) {
+    ss = Math.max(14, Math.round(hs * r));
+    hl = brWrap(x, o.head, `900 ${hs}px ${BR_F}`, B.w, 99); sl = brWrap(x, brLines(o.sub), `500 ${ss}px ${BR_F}`, B.w, 99);
+    tot = barH + hl.length * hs * 1.22 + (hl.length && sl.length ? 18 : 0) + sl.length * ss * 1.45;
+    if (tot <= B.h - nameH || hs <= 16) break;
+    hs -= 2;
+  }
+  let y = B.y + Math.max(0, (B.h - nameH - tot) / 2);
+  x.textAlign = al; x.textBaseline = 'top';
+  if (barH) { x.fillStyle = st.acc; x.fillRect(al === 'center' ? tx - 36 : tx, y, 72, 10); y += barH; }
+  if (st.shadow) { x.shadowColor = st.shadow; x.shadowBlur = 10; }
+  x.font = `900 ${hs}px ${BR_F}`; x.fillStyle = st.fg; hl.forEach((l, k) => x.fillText(l, tx, y + k * hs * 1.22)); y += hl.length * hs * 1.22 + (hl.length && sl.length ? 18 : 0);
+  x.font = `500 ${ss}px ${BR_F}`; x.fillStyle = st.mut; sl.forEach((l, k) => x.fillText(l, tx, y + k * ss * 1.45));
+  x.shadowColor = 'transparent'; x.shadowBlur = 0;
+  if (!st.noName) {
+    x.font = `700 ${nf}px ${BR_F}`; x.fillStyle = st.nameC || st.mut; x.textBaseline = 'bottom';
+    nl.forEach((l, k) => x.fillText(l, tx, B.y + B.h - (nl.length - 1 - k) * nf * 1.3));
+  }
+}
+const brDots = (x, col, step = 34, r = 3) => { x.fillStyle = col; for (let a = step / 2; a < 1200; a += step) for (let b = step / 2; b < 630; b += step) { x.beginPath(); x.arc(a, b, r, 0, 7); x.fill(); } };
+const brShadow = (x, c, blur, dx = 0, dy = 10) => { x.shadowColor = c; x.shadowBlur = blur; x.shadowOffsetX = dx; x.shadowOffsetY = dy; };
+const brNoShadow = (x) => { x.shadowColor = 'transparent'; x.shadowBlur = 0; x.shadowOffsetX = 0; x.shadowOffsetY = 0; };
 function drawBridge(c, o) {
-  const x = c.getContext('2d'), W = 1200, H = 630, dark = o.tpl === 'dark';
-  const F = '"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif';
-  const C = dark ? { bg1: '#2b211d', bg2: '#140f0d', acc: '#ff8a5c', fg: '#fff7f0', mut: '#f1d9cb', bar: 'rgba(0,0,0,0.45)' } : { bg1: '#fff6ef', bg2: '#ffd6c2', acc: '#c62938', fg: '#1f1a17', mut: '#5c4a40', bar: 'rgba(255,255,255,0.78)' };
-  let g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, C.bg1); g.addColorStop(1, C.bg2); x.fillStyle = g; x.fillRect(0, 0, W, H);
-  x.fillStyle = dark ? 'rgba(255,138,92,0.10)' : 'rgba(198,41,56,0.08)'; x.beginPath(); x.arc(1080, 90, 260, 0, Math.PI * 2); x.fill(); x.beginPath(); x.arc(120, 600, 180, 0, Math.PI * 2); x.fill();
-  x.fillStyle = C.acc; x.fillRect(0, 0, 18, H);
-  const wrap = (t, font, maxW, maxLines) => {
-    x.font = font; const out = []; let cur = '';
-    for (const ch of [...String(t || '')]) { if (ch === '\n') { out.push(cur); cur = ''; continue; } if (x.measureText(cur + ch).width > maxW && cur) { out.push(cur); cur = ch; } else cur += ch; }
-    if (cur) out.push(cur);
-    if (out.length > maxLines) { out.length = maxLines; let l = out[maxLines - 1]; while (l && x.measureText(l + '…').width > maxW) l = [...l].slice(0, -1).join(''); out[maxLines - 1] = l + '…'; }
-    return out;
-  };
-  const hf = `900 74px ${F}`, sf = `500 40px ${F}`;
-  const hl = wrap(o.head, hf, 1060, 2), sl = wrap(o.sub, sf, 1060, 3);
-  const hH = hl.length * 92, sH = sl.length * 58, gap = hl.length && sl.length ? 28 : 0;
-  let y = Math.max(60, (520 - (hH + gap + sH)) / 2);
-  x.textBaseline = 'top'; x.textAlign = 'left';
-  x.font = hf; x.fillStyle = C.fg; hl.forEach((l, k) => x.fillText(l, 70, y + k * 92)); y += hH + gap;
-  x.font = sf; x.fillStyle = C.mut; sl.forEach((l, k) => x.fillText(l, 70, y + k * 58));
-  // 下方：名稱
-  x.fillStyle = C.bar; x.fillRect(18, 530, W - 18, 100);
-  x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = C.fg;
-  const name = wrap(`${o.kind === 'shop' ? '🏪' : '🛍️'} ${o.name}`, `800 34px ${F}`, W - 140, 1)[0] || '';
-  x.font = `800 34px ${F}`; x.fillText(name, 70, 581);
+  const x = c.getContext('2d'), W = 1200, H = 630;
+  x.save(); x.textAlign = 'left'; x.textBaseline = 'top'; brNoShadow(x);
+  // 只用圖片：整張就是使用者的圖
+  if (o.img && o.photoOnly) { x.fillStyle = '#000'; x.fillRect(0, 0, W, H); brPlace(x, o, { x: 0, y: 0, w: W, h: H }, ['#ffffff', '#f1f5f9']); x.restore(); return; }
+  const lin = (a, b, x0 = 0, y0 = 0, x1 = W, y1 = H) => { const g = x.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, a); g.addColorStop(1, b); return g; };
+  switch (o.style) {
+    case 'fresh': {
+      x.fillStyle = lin('#f5f9ff', '#dcebff'); x.fillRect(0, 0, W, H);
+      x.fillStyle = 'rgba(37,99,235,0.08)'; x.beginPath(); x.arc(1120, 80, 220, 0, 7); x.fill();
+      const r = { x: 40, y: 40, w: 560, h: 550 };
+      brShadow(x, 'rgba(15,39,71,0.18)', 30); x.fillStyle = '#fff'; brRR(x, r.x - 8, r.y - 8, r.w + 16, r.h + 16, 30); x.fill(); brNoShadow(x);
+      brPic(x, o, r, 24, ['#bfdbfe', '#93c5fd']);
+      brTxt(x, o, { x: 660, y: 60, w: 490, h: 510 }, { fg: '#0f2747', mut: '#3d5a80', acc: '#2563eb', bar: true });
+      break;
+    }
+    case 'magazine': {
+      x.fillStyle = '#171311'; x.fillRect(0, 0, W, H);
+      brPic(x, o, { x: 0, y: 0, w: 690, h: H }, 0, ['#3b2f2a', '#5a463c']);
+      x.fillStyle = '#ff8a5c'; x.fillRect(690, 0, 8, H);
+      brTxt(x, o, { x: 745, y: 60, w: 405, h: 510 }, { fg: '#fff7f0', mut: '#e9d6ca', acc: '#ff8a5c', bar: true, hs: 60, ss: 32 });
+      break;
+    }
+    case 'polaroid': {
+      x.fillStyle = '#f4ede4'; x.fillRect(0, 0, W, H); brDots(x, 'rgba(120,90,60,0.10)');
+      x.save(); x.translate(880, 310); x.rotate(-0.06);
+      brShadow(x, 'rgba(60,40,20,0.28)', 28, 6, 14); x.fillStyle = '#fff'; x.fillRect(-230, -265, 460, 530); brNoShadow(x);
+      brPic(x, o, { x: -205, y: -240, w: 410, h: 410 }, 2, ['#fde2c8', '#f6b98a']);
+      x.restore();
+      brTxt(x, o, { x: 70, y: 60, w: 520, h: 510 }, { fg: '#3b2a20', mut: '#6b5444', acc: '#d9480f', bar: true });
+      break;
+    }
+    case 'caption': {
+      x.fillStyle = '#111'; x.fillRect(0, 0, W, H);
+      brPic(x, o, { x: 0, y: 0, w: W, h: 400 }, 0, ['#374151', '#6b7280']);
+      x.fillStyle = '#ffcc00'; x.fillRect(0, 400, W, 8);
+      brTxt(x, o, { x: 60, y: 428, w: 1080, h: 182 }, { fg: '#fff', mut: '#e5e7eb', acc: '#ffcc00', hs: 50, ss: 30, nameC: '#ffcc00' });
+      break;
+    }
+    case 'circle': {
+      x.fillStyle = lin('#fff1f7', '#fce7f3'); x.fillRect(0, 0, W, H);
+      x.fillStyle = 'rgba(219,39,119,0.14)'; [[640, 90, 16], [1150, 560, 26], [700, 560, 10], [1160, 70, 12]].forEach(([a, b, r]) => { x.beginPath(); x.arc(a, b, r, 0, 7); x.fill(); });
+      brShadow(x, 'rgba(120,20,70,0.22)', 30); x.fillStyle = '#fff'; x.beginPath(); x.arc(900, 315, 270, 0, 7); x.fill(); brNoShadow(x);
+      x.save(); x.beginPath(); x.arc(900, 315, 255, 0, 7); x.clip(); brPic(x, o, { x: 645, y: 60, w: 510, h: 510 }, 0, ['#fbcfe8', '#f9a8d4']); x.restore();
+      brTxt(x, o, { x: 70, y: 60, w: 520, h: 510 }, { fg: '#4a1d3a', mut: '#7a4a68', acc: '#db2777', bar: true });
+      break;
+    }
+    case 'pop': {
+      x.fillStyle = '#ffd400'; x.fillRect(0, 0, W, H);
+      x.fillStyle = '#111'; brRR(x, 656, 66, 500, 500, 24); x.fill();
+      x.fillStyle = '#111'; brRR(x, 630, 40, 510, 510, 26); x.fill();
+      brPic(x, o, { x: 640, y: 50, w: 490, h: 490 }, 18, ['#fff3a3', '#ffe14d']);
+      brTxt(x, o, { x: 60, y: 60, w: 530, h: 510 }, { fg: '#111', mut: '#2b2b2b', acc: '#111', bar: true, hs: 76, nameC: '#111' });
+      break;
+    }
+    case 'minimal': {
+      x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+      brPic(x, o, { x: 640, y: 0, w: 560, h: H }, 0, ['#f3f4f6', '#e5e7eb']);
+      x.fillStyle = '#111'; x.fillRect(640, 0, 2, H);
+      brTxt(x, o, { x: 70, y: 80, w: 510, h: 480 }, { fg: '#111', mut: '#555', acc: '#e11d48', bar: true });
+      break;
+    }
+    case 'float': {
+      x.fillStyle = lin('#e0e7ff', '#fae8ff'); x.fillRect(0, 0, W, H);
+      const r = { x: 650, y: 60, w: 500, h: 510 };
+      brShadow(x, 'rgba(76,29,149,0.30)', 50, 0, 24); x.fillStyle = '#fff'; brRR(x, r.x, r.y, r.w, r.h, 32); x.fill(); brNoShadow(x);
+      brPic(x, o, r, 32, ['#ddd6fe', '#c4b5fd']);
+      x.fillStyle = 'rgba(255,255,255,0.82)'; brRR(x, 40, 70, 570, 490, 28); x.fill();
+      brTxt(x, o, { x: 80, y: 100, w: 490, h: 430 }, { fg: '#1e1b4b', mut: '#4c4a7a', acc: '#7c3aed', bar: true, hs: 62 });
+      break;
+    }
+    case 'festive': {
+      const g = x.createRadialGradient(400, 315, 60, 600, 315, 800); g.addColorStop(0, '#9f1239'); g.addColorStop(1, '#4c0519'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+      x.strokeStyle = '#f5c451'; x.lineWidth = 3; x.strokeRect(20, 20, W - 40, H - 40); x.lineWidth = 1; x.strokeRect(30, 30, W - 60, H - 60);
+      const r = { x: 650, y: 70, w: 490, h: 490 };
+      x.fillStyle = '#f5c451'; brRR(x, r.x - 8, r.y - 8, r.w + 16, r.h + 16, 26); x.fill();
+      brPic(x, o, r, 20, ['#be123c', '#881337']);
+      brTxt(x, o, { x: 80, y: 80, w: 520, h: 470 }, { fg: '#fff4d6', mut: '#fcd9a8', acc: '#f5c451', bar: true, nameC: '#f5c451' });
+      break;
+    }
+    case 'headline': { // 上字下圖
+      x.fillStyle = lin('#ffffff', '#fff1e6', 0, 0, 0, H); x.fillRect(0, 0, W, H);
+      brTxt(x, o, { x: 60, y: 26, w: 1080, h: 222 }, { fg: '#1f1a17', mut: '#5c4a40', acc: '#ea580c', bar: true, align: 'center', hs: 58, ss: 30 });
+      const r = { x: 40, y: 264, w: 1120, h: 340 };
+      brShadow(x, 'rgba(90,40,20,0.18)', 24); x.fillStyle = '#fff'; brRR(x, r.x, r.y, r.w, r.h, 22); x.fill(); brNoShadow(x);
+      brPic(x, o, r, 22, ['#ffe4cc', '#ffc59e']);
+      break;
+    }
+    case 'cinema': { // 電影寬螢幕：上下黑邊放字，中間寬幅圖
+      x.fillStyle = '#0b0b0c'; x.fillRect(0, 0, W, H);
+      brPic(x, o, { x: 0, y: 150, w: W, h: 330 }, 0, ['#1f2937', '#374151']);
+      x.fillStyle = '#e8b04a'; x.fillRect(0, 146, W, 4); x.fillRect(0, 480, W, 4);
+      brTxt(x, { ...o, sub: '' }, { x: 60, y: 18, w: 1080, h: 116 }, { fg: '#fff', mut: '#d1d5db', acc: '#e8b04a', align: 'center', hs: 56, noName: true });
+      brTxt(x, { ...o, head: '' }, { x: 60, y: 496, w: 1080, h: 120 }, { fg: '#fff', mut: '#e5e7eb', acc: '#e8b04a', align: 'center', hs: 50, ss: 30, nameC: '#e8b04a' });
+      break;
+    }
+    case 'newspaper': { // 報紙頭條：大標、寬幅照片、圖說
+      x.fillStyle = '#f5f0e6'; x.fillRect(0, 0, W, H);
+      x.fillStyle = '#1c1917'; x.fillRect(50, 20, 1100, 4); x.fillRect(50, 28, 1100, 1);
+      brTxt(x, { ...o, sub: '' }, { x: 50, y: 34, w: 1100, h: 140 }, { fg: '#1c1917', mut: '#44403c', acc: '#1c1917', align: 'center', hs: 64, noName: true });
+      x.fillStyle = '#1c1917'; x.fillRect(48, 184, 1104, 304);
+      brPic(x, o, { x: 50, y: 186, w: 1100, h: 300 }, 0, ['#e7e5e4', '#d6d3d1']);
+      brTxt(x, { ...o, head: '' }, { x: 50, y: 500, w: 1100, h: 112 }, { fg: '#1c1917', mut: '#44403c', acc: '#1c1917', align: 'center', hs: 50, ss: 30, nameC: '#78716c' });
+      x.fillStyle = '#1c1917'; x.fillRect(50, 616, 1100, 2);
+      break;
+    }
+    case 'banner': { // 漸層橫幅：上大字、中寬圖、下小字
+      x.fillStyle = lin('#0ea5e9', '#6366f1'); x.fillRect(0, 0, W, H);
+      x.fillStyle = 'rgba(255,255,255,0.10)'; x.beginPath(); x.arc(80, 60, 160, 0, 7); x.fill(); x.beginPath(); x.arc(1140, 600, 200, 0, 7); x.fill();
+      brTxt(x, { ...o, sub: '' }, { x: 60, y: 22, w: 1080, h: 148 }, { fg: '#fff', mut: '#e0f2fe', acc: '#fff', align: 'center', hs: 60, noName: true, shadow: 'rgba(0,0,0,0.25)' });
+      const r = { x: 60, y: 180, w: 1080, h: 310 };
+      x.fillStyle = '#fff'; brRR(x, r.x - 8, r.y - 8, r.w + 16, r.h + 16, 26); x.fill();
+      brPic(x, o, r, 20, ['#bae6fd', '#c7d2fe']);
+      brTxt(x, { ...o, head: '' }, { x: 60, y: 508, w: 1080, h: 108 }, { fg: '#fff', mut: '#f0f9ff', acc: '#fff', align: 'center', hs: 50, ss: 30, nameC: '#fff' });
+      break;
+    }
+    case 'ticket': { // 票券：左寬圖、虛線撕口、右側票根放字
+      x.fillStyle = '#1f2937'; x.fillRect(0, 0, W, H);
+      x.fillStyle = '#fdf6e3'; brRR(x, 36, 36, 1128, 558, 24); x.fill();
+      x.fillStyle = '#1f2937'; x.beginPath(); x.arc(770, 36, 22, 0, 7); x.fill(); x.beginPath(); x.arc(770, 594, 22, 0, 7); x.fill();
+      x.strokeStyle = '#b8a98a'; x.lineWidth = 3; x.setLineDash([10, 10]); x.beginPath(); x.moveTo(770, 70); x.lineTo(770, 560); x.stroke(); x.setLineDash([]);
+      brPic(x, o, { x: 60, y: 60, w: 680, h: 510 }, 16, ['#fde68a', '#fcd34d']);
+      brTxt(x, o, { x: 800, y: 76, w: 335, h: 478 }, { fg: '#1f2937', mut: '#4b5563', acc: '#dc2626', bar: true, hs: 48, ss: 28, nameC: '#6b7280' });
+      break;
+    }
+    default: { // classic 經典暖色
+      x.fillStyle = lin('#fff6ef', '#ffd6c2'); x.fillRect(0, 0, W, H);
+      x.fillStyle = 'rgba(198,41,56,0.08)'; x.beginPath(); x.arc(120, 600, 180, 0, 7); x.fill();
+      x.fillStyle = '#c62938'; x.fillRect(0, 0, 14, H);
+      const r = { x: 620, y: 40, w: 540, h: 550 };
+      brShadow(x, 'rgba(90,40,20,0.20)', 30); x.fillStyle = '#fff'; brRR(x, r.x - 10, r.y - 10, r.w + 20, r.h + 20, 30); x.fill(); brNoShadow(x);
+      brPic(x, o, r, 22, ['#ffd9c4', '#ffb899']);
+      brTxt(x, o, { x: 70, y: 60, w: 500, h: 510 }, { fg: '#1f1a17', mut: '#5c4a40', acc: '#c62938', bar: true });
+    }
+  }
+  x.restore();
+}
+// 模板縮圖：用同一支畫圖程式縮小 5 倍畫
+function brThumbs(o) {
+  $$('#brStyles canvas').forEach((cv) => { const x = cv.getContext('2d'); x.setTransform(0.2, 0, 0, 0.2, 0, 0); drawBridge(cv, { ...o, style: cv.dataset.s, photoOnly: false }); x.setTransform(1, 0, 0, 1, 0, 0); });
 }
 function brDlg(i) {
   const src = brSrc(i), b = i.bridge || {}, d = $('#dlg');
-  const head = b.head ?? (src.heads[0] || ''), sub = b.sub ?? brShort(src.posts[0] || ''), desc = b.desc ?? noTags(src.posts[0] || '').slice(0, 300);
-  const opt = (arr, f) => arr.map((t, k) => `<option value="${k}">${esc([...f(t)].slice(0, 30).join(''))}</option>`).join('');
+  const sty = b.style || (b.tpl === 'dark' ? 'magazine' : 'classic'), ba = b.adj || {};
+  const head = b.head ?? (src.heads[0] || ''), sub = b.sub ?? brShort(src.posts[0] || ''), desc = b.desc ?? noTags(src.posts[0] || '').replace(/\s+/g, ' ').slice(0, 300);
   d.innerHTML = `<div class="dlg-head"><h2>🔗 橋接頁｜${esc(i.name)}</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
     <canvas id="brCv" width="1200" height="630" hidden></canvas>
     <div class="tabs cat-tabs" role="tablist" aria-label="預覽樣式"><button type="button" role="tab" data-act="brMock" data-m="threads" aria-selected="true">Threads 預覽</button><button type="button" role="tab" data-act="brMock" data-m="fb" aria-selected="false">Facebook 預覽</button></div>
     <div id="brMock" class="mock threads"></div>
-    <div class="checks" role="radiogroup" aria-label="模板"><label><input type="radio" name="brTpl" value="warm"${b.tpl !== 'dark' ? ' checked' : ''}>暖色</label><label><input type="radio" name="brTpl" value="dark"${b.tpl === 'dark' ? ' checked' : ''}>深色</label></div>
+    <div class="br-photo"><label class="btn br-up">🖼️ <span id="brUpTxt">${b.photo ? '更換圖片' : '加入自己的圖片'}</span><input type="file" id="brPhoto" accept="image/*"></label><button type="button" class="ghost" data-act="brPhotoDel" id="brPhotoDel"${b.photo ? '' : ' hidden'}>移除圖片</button><span class="muted sm">選填，建議用商品照或影片截圖</span></div>
+    <div class="checks" id="brFitRow"${b.photo ? '' : ' hidden'}><label><input type="radio" name="brFit" value="contain"${b.fit !== 'cover' ? ' checked' : ''}>自動縮放（完整顯示）</label><label><input type="radio" name="brFit" value="cover"${b.fit === 'cover' ? ' checked' : ''}>填滿（裁切邊緣）</label><label><input type="checkbox" id="brPhotoOnly"${b.photoOnly ?? b.lay === 'photo' ? ' checked' : ''}>只用圖片（不加字）</label></div>
+    <details class="br-adj" id="brAdj"${b.photo ? '' : ' hidden'} open><summary>🛠️ 調整圖片（縮放、位置、裁切、去背）</summary>
+      <div class="br-adj-g">
+        <label>縮放 <output id="brZo"></output><input type="range" id="brZ" min="50" max="300" step="5" value="${Math.round((ba.z || 1) * 100)}"></label>
+        <label>左右位置 <output id="brPxo"></output><input type="range" id="brPx" min="-100" max="100" step="2" value="${Math.round((ba.px || 0) * 100)}"></label>
+        <label>上下位置 <output id="brPyo"></output><input type="range" id="brPy" min="-100" max="100" step="2" value="${Math.round((ba.py || 0) * 100)}"></label>
+      </div>
+      <p class="muted sm">裁切（從各邊切掉的比例）</p>
+      <div class="br-adj-g">
+        <label>上 <output id="brCto"></output><input type="range" id="brCt" min="0" max="45" step="1" value="${ba.ct || 0}"></label>
+        <label>下 <output id="brCbo"></output><input type="range" id="brCb" min="0" max="45" step="1" value="${ba.cb || 0}"></label>
+        <label>左 <output id="brClo"></output><input type="range" id="brCl" min="0" max="45" step="1" value="${ba.cl || 0}"></label>
+        <label>右 <output id="brCro"></output><input type="range" id="brCr" min="0" max="45" step="1" value="${ba.cr || 0}"></label>
+      </div>
+      <div class="br-adj-g">
+        <label class="chk"><input type="checkbox" id="brCut"${ba.cut ? ' checked' : ''}> 去除背景</label>
+        <label>去背強度 <output id="brTolo"></output><input type="range" id="brTol" min="10" max="120" step="2" value="${ba.tol || 40}"></label>
+      </div>
+      <p class="muted sm">去背是依背景顏色自動去除，適合白底、單色或簡單背景的商品照；背景複雜時效果有限，可調整強度。</p>
+      <button type="button" class="ghost" data-act="brAdjReset">全部重設</button>
+    </details>
+    <fieldset class="br-styles" id="brStyles"><legend>模板風格</legend>${BR_STYLES.map(([k, n]) => `<label class="br-sty"><input type="radio" name="brSty" value="${k}"${k === sty ? ' checked' : ''}><canvas width="240" height="126" data-s="${k}" aria-hidden="true"></canvas><span>${n}</span></label>`).join('')}</fieldset>
+    <label class="chk"><input type="checkbox" id="brShowName"${b.showName ? ' checked' : ''}> 在預覽圖上顯示${i.kind === 'shop' ? '賣場' : '商品'}名稱</label>
     <label>預覽卡片標題<input id="brTitle" maxlength="80" value="${esc(b.title ?? i.name)}"></label>
-    <label>圖上大字（約 16 字）${src.heads.length ? `<select id="brHeadSel"><option value="">從吸睛第一句帶入…</option>${opt(src.heads, (t) => t)}</select>` : ''}<input id="brHead" maxlength="40" value="${esc(head)}" placeholder="例如：保養品補貨就趁現在"></label>
-    <label>圖上小字（約 40 字）${src.posts.length ? `<select id="brSubSel"><option value="">從短貼文帶入…</option>${opt(src.posts, noTags)}</select>` : ''}<textarea id="brSub" rows="2" maxlength="80">${esc(sub)}</textarea></label>
+    <p class="muted sm" id="brSlugHint">橋接網址：${esc(location.host)}/${esc(slugify(head) || '（填入圖上大字後產生）')}</p>
+    <label>圖上大字（約 16 字）${src.heads.length ? `<select id="brHeadSel"><option value="">從 AI 文案帶入（吸睛句／節慶／短貼文）…</option>${brOpts(src.heads, src.hg, (t) => t)}</select>` : ''}<input id="brHead" maxlength="40" value="${esc(head)}" placeholder="例如：保養品補貨就趁現在"></label>
+    <label>圖上小字（約 40 字）${src.posts.length ? `<select id="brSubSel"><option value="">從 AI 文案帶入（節慶活動文案／短貼文）…</option>${brOpts(src.posts, src.pg, (t) => noTags(t).replace(/\s+/g, ' '))}</select>` : ''}<textarea id="brSub" rows="3" maxlength="120">${esc(sub)}</textarea></label>
     <label>卡片說明文字（顯示在預覽圖下方）<textarea id="brDesc" rows="3" maxlength="300">${esc(desc)}</textarea></label>
     ${src.heads.length || src.posts.length ? '' : '<p class="hint">這件還沒有 AI 文案，可以先手動填寫，或先按「產生文案」再回來帶入。</p>'}
     <p class="hint">真人點進橋接網址會立刻轉到${i.kind === 'shop' ? '賣場' : '商品頁'}。預覽圖與標題請如實反映要去的${i.kind === 'shop' ? '賣場' : '商品'}。</p>
     <p id="brErr" class="ferr" role="alert" hidden></p>
     <div class="btns"><button type="button" class="pri" data-act="brSave" data-id="${esc(i.id)}">${brLive(i) ? '更新橋接頁' : '發布橋接頁'}</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>`;
   if (!d.open) d.showModal();
-  const redraw = () => { drawBridge($('#brCv'), { tpl: $('input[name="brTpl"]:checked')?.value, head: $('#brHead').value.trim(), sub: $('#brSub').value.trim(), name: i.name, kind: i.kind }); brMockDraw(i); };
-  d._brRedraw = redraw; d._brSrc = src; d._brMock = 'threads'; redraw();
+  let thT;
+  const redraw = () => {
+    const only = !!d._brImg && $('#brPhotoOnly').checked;
+    $('#brPhotoDel').hidden = !d._brImg; $('#brFitRow').hidden = !d._brImg; $('#brAdj').hidden = !d._brImg; brAdjOut(); $('#brStyles').hidden = only; $('#brUpTxt').textContent = d._brImg ? '更換圖片' : '加入自己的圖片';
+    const o = { style: $('input[name="brSty"]:checked')?.value || 'classic', head: $('#brHead').value.trim(), sub: $('#brSub').value.trim(), name: i.name, kind: i.kind, img: d._brImg, fit: $('input[name="brFit"]:checked')?.value, photoOnly: only, hideName: !$('#brShowName').checked, adj: brAdjRead() };
+    drawBridge($('#brCv'), o); brMockDraw(i);
+    clearTimeout(thT); thT = setTimeout(() => brThumbs(o), 120);
+  };
+  d._brRedraw = redraw; d._brSrc = src; d._brMock = 'threads'; d._brImg = null; d._brOrig = null; d._brPhoto = undefined; redraw();
+  // 再次編輯：載入之前上傳的原圖
+  if (b.photo && b.code) { const im = new Image(); im.onload = () => { if (d.open && $('#brCv')) { d._brOrig = im; brProcess(); redraw(); } }; im.src = `/s/${b.code}/src.jpg?v=${b.at || ''}`; }
+}
+function brAdjOut() {
+  const set = (id, t) => { const o = $(`#${id}o`); if (o) o.textContent = t; }, v = (id) => +($(`#${id}`)?.value || 0);
+  set('brZ', `${v('brZ')}%`); set('brPx', v('brPx')); set('brPy', v('brPy'));
+  ['brCt', 'brCb', 'brCl', 'brCr'].forEach((k) => set(k, `${v(k)}%`)); set('brTol', v('brTol'));
+}
+function brAdjSet(a) {
+  const put = (id, val) => { const el = $(`#${id}`); if (el) el.value = val; };
+  put('brZ', Math.round((a.z || 1) * 100)); put('brPx', Math.round((a.px || 0) * 100)); put('brPy', Math.round((a.py || 0) * 100));
+  put('brCt', a.ct || 0); put('brCb', a.cb || 0); put('brCl', a.cl || 0); put('brCr', a.cr || 0); put('brTol', a.tol || 40);
+  const c = $('#brCut'); if (c) c.checked = !!a.cut;
+}
+// 讀取圖片調整控制項
+function brAdjRead() {
+  const v = (id, def = 0) => { const el = $(`#${id}`); return el ? +el.value : def; };
+  return { z: v('brZ', 100) / 100, px: v('brPx') / 100, py: v('brPy') / 100, ct: v('brCt'), cb: v('brCb'), cl: v('brCl'), cr: v('brCr'), cut: !!$('#brCut')?.checked, tol: v('brTol', 40) };
+}
+// 去背：從圖片四邊往內找「接近背景色」的區域變透明（適合單色或簡單背景）
+function brCutBg(cv, tol) {
+  const x = cv.getContext('2d'), W = cv.width, H = cv.height, im = x.getImageData(0, 0, W, H), d = im.data;
+  let r = 0, g = 0, b = 0, n = 0;
+  const edge = (i) => { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; };
+  for (let xx = 0; xx < W; xx++) { edge(xx * 4); edge(((H - 1) * W + xx) * 4); }
+  for (let yy = 0; yy < H; yy++) { edge(yy * W * 4); edge((yy * W + W - 1) * 4); }
+  r /= n; g /= n; b /= n;
+  const dist = (i, R, G, B) => Math.hypot(d[i] - R, d[i + 1] - G, d[i + 2] - B);
+  const seen = new Uint8Array(W * H), st = new Int32Array(W * H), from = new Int32Array(W * H); let sp = 0;
+  const push = (k, f) => { if (seen[k]) return; const i = k * 4; const fi = f * 4;
+    if (dist(i, r, g, b) < tol || (dist(i, d[fi], d[fi + 1], d[fi + 2]) < tol * 0.25 && dist(i, r, g, b) < tol * 2.5)) { seen[k] = 1; from[k] = f; st[sp++] = k; } };
+  for (let xx = 0; xx < W; xx++) { push(xx, xx); push((H - 1) * W + xx, (H - 1) * W + xx); }
+  for (let yy = 0; yy < H; yy++) { push(yy * W, yy * W); push(yy * W + W - 1, yy * W + W - 1); }
+  while (sp) { const k = st[--sp], xx = k % W, yy = (k - xx) / W;
+    if (xx > 0) push(k - 1, k); if (xx < W - 1) push(k + 1, k); if (yy > 0) push(k - W, k); if (yy < H - 1) push(k + W, k); }
+  for (let k = 0; k < W * H; k++) {
+    if (seen[k]) { d[k * 4 + 3] = 0; continue; }
+    const xx = k % W, yy = (k - xx) / W;   // 邊緣柔化：緊鄰背景的像素半透明
+    if ((xx > 0 && seen[k - 1]) || (xx < W - 1 && seen[k + 1]) || (yy > 0 && seen[k - W]) || (yy < H - 1 && seen[k + W])) d[k * 4 + 3] = 170;
+  }
+  x.putImageData(im, 0, 0); return cv;
+}
+// 依裁切／去背設定，從原圖產生要畫的圖
+function brProcess() {
+  const d = $('#dlg'), src = d._brOrig; if (!src) { d._brImg = null; return; }
+  const a = brAdjRead(), iw = src.naturalWidth || src.width, ih = src.naturalHeight || src.height;
+  const sx = Math.round(iw * a.cl / 100), sy = Math.round(ih * a.ct / 100), sw = Math.max(10, Math.round(iw * (1 - (a.cl + a.cr) / 100))), sh = Math.max(10, Math.round(ih * (1 - (a.ct + a.cb) / 100)));
+  if (!a.cut && !sx && !sy && sw === iw && sh === ih) { d._brImg = src; return; }
+  const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+  cv.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+  d._brImg = a.cut ? brCutBg(cv, a.tol) : cv;
+}
+// 上傳的圖片縮到長邊 1200 再存（JPEG），避免檔案過大
+function brLoadPhoto(file) {
+  const d = $('#dlg'), e = $('#brErr');
+  if (!file || !/^image\//.test(file.type)) { e.textContent = '請選擇圖片檔'; e.hidden = false; return; }
+  if (file.size > 20e6) { e.textContent = '圖片太大（上限 20MB）'; e.hidden = false; return; }
+  const url = URL.createObjectURL(file), im = new Image();
+  im.onload = () => {
+    const s = Math.min(1, 1200 / Math.max(im.naturalWidth, im.naturalHeight)), cv = document.createElement('canvas');
+    cv.width = Math.round(im.naturalWidth * s); cv.height = Math.round(im.naturalHeight * s);
+    const x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, cv.width, cv.height); x.drawImage(im, 0, 0, cv.width, cv.height);
+    URL.revokeObjectURL(url);
+    d._brOrig = cv; d._brPhoto = cv.toDataURL('image/jpeg', 0.85); e.hidden = true; brAdjSet({}); brProcess(); d._brRedraw?.();
+  };
+  im.onerror = () => { URL.revokeObjectURL(url); e.textContent = '這張圖片讀不出來，請換一張（建議 JPG／PNG）'; e.hidden = false; };
+  im.src = url;
 }
 // 模擬貼文裡的連結卡片外觀（Threads／Facebook）；實際樣子以平台顯示為準
 function brMockDraw(i) {
@@ -705,13 +1059,21 @@ function brMockDraw(i) {
 }
 async function brSave(b) {
   const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
-  const title = $('#brTitle').value.trim(), head = $('#brHead').value.trim(), sub = $('#brSub').value.trim(), desc = $('#brDesc').value.trim(), tpl = $('input[name="brTpl"]:checked')?.value === 'dark' ? 'dark' : 'warm';
-  const err = !title ? '請填寫預覽卡片標題' : !head ? '請填寫圖上大字' : !okDest(i.aff) ? '橋接頁只支援蝦皮的連結（shopee／shp.ee）' : '';
+  const d = $('#dlg'), title = $('#brTitle').value.trim(), head = $('#brHead').value.trim(), sub = $('#brSub').value.trim(), desc = $('#brDesc').value.trim();
+  const style = $('input[name="brSty"]:checked')?.value || 'classic', photoOnly = !!d._brImg && $('#brPhotoOnly').checked;
+  const slug = slugify(head) || slugify(title);   // 橋接網址＝圖上大字（重複時伺服器自動加 -2）
+  const err = !title ? '請填寫預覽卡片標題' : !head && !photoOnly ? '請填寫圖上大字' : !okDest(i.aff) ? '橋接頁只支援蝦皮的連結（shopee／shp.ee）' : '';
   const e = $('#brErr'); e.textContent = err; e.hidden = !err; if (err) return;
-  const cv = $('#brCv'); drawBridge(cv, { tpl, head, sub, name: i.name, kind: i.kind });
+  const fit = $('input[name="brFit"]:checked')?.value === 'cover' ? 'cover' : 'contain';
+  const cv = $('#brCv'); const showName = $('#brShowName').checked;
+  const adj = d._brImg ? brAdjRead() : undefined;
+  drawBridge(cv, { style, head, sub, name: i.name, kind: i.kind, img: d._brImg, fit, photoOnly, hideName: !showName, adj });
   try {
-    const j = await bridgeApi({ action: 'save', code: i.bridge?.code || '', kind: i.kind === 'shop' ? 'shop' : 'item', title, desc, dest: i.aff, image: cv.toDataURL('image/jpeg', 0.88) }, b);
-    i.bridge = { code: j.code, at: j.at, title, head, sub, desc, tpl };
+    const body = { action: 'save', code: i.bridge?.code || '', slug, kind: i.kind === 'shop' ? 'shop' : 'item', title, desc, dest: i.aff, image: cv.toDataURL('image/jpeg', 0.88) };
+    if (d._brPhoto !== undefined) body.photo = d._brPhoto;   // 新上傳＝字串、移除＝null、沒動＝不帶
+    else if (d._brOrig && !i.bridge?.photo) body.photo = (d._brOrig.toDataURL ? d._brOrig : (() => { const c = document.createElement('canvas'); c.width = d._brOrig.naturalWidth; c.height = d._brOrig.naturalHeight; c.getContext('2d').drawImage(d._brOrig, 0, 0); return c; })()).toDataURL('image/jpeg', 0.85);
+    const j = await bridgeApi(body, b);
+    i.bridge = { code: j.code, at: j.at, title, head, sub, desc, style, photo: !!d._brImg, photoOnly, fit, showName, adj, slug: j.slug || undefined };
     save.i(); $('#dlg').close(); route(); toast('橋接頁已發布，可按「複製橋接網址」貼到貼文');
   } catch (er) { e.textContent = er.message; e.hidden = false; }
 }
@@ -814,7 +1176,7 @@ async function renderStats(refetch = true) {
   const cnt = (s, f) => Object.entries(s.days || {}).reduce((t, [d, n]) => t + (f(d) ? n : 0), 0);
   const isToday = (d) => d === j.today, d30 = new Set(dayKeys(j.today, 30)), in30 = (d) => d30.has(d);
   const d7 = new Set(dayKeys(j.today, 7)), in7 = (d) => d7.has(d);
-  const rows = codes.map((c) => { const s = j.stats[c], i = (s.codes || [c]).map((k) => byCode.get(k)).find(Boolean) || { id: '', name: s.title || c, kind: s.kind === 'shop' ? 'shop' : '', bridge: { code: c }, gone: true }; return { c, i, s, range: cnt(s, inR), today: cnt(s, isToday), week: cnt(s, in7), month: cnt(s, in30), total: s.total || 0 }; })
+  const rows = codes.map((c) => { const s = j.stats[c], i = (s.codes || [c]).map((k) => byCode.get(k)).find(Boolean) || { id: '', name: s.title || c, kind: s.kind === 'shop' ? 'shop' : '', bridge: { code: c }, gone: true }; if (i.gone && s.slug) i.bridge.slug = s.slug; return { c, i, s, range: cnt(s, inR), today: cnt(s, isToday), week: cnt(s, in7), month: cnt(s, in30), total: s.total || 0 }; })
     .sort((a, b) => b.range - a.range || b.total - a.total);
   const sum = (k) => rows.reduce((t, r) => t + r[k], 0);
   const dup = { today: 'today', 7: 'week', 30: 'month', all: 'total' }[statRange];
@@ -840,7 +1202,7 @@ let catSel = 'all', gradeSel = 'all', shownIds = [];
 function renderList() {
   // 類別按鈕：點選即顯示該類別排行（件數依類別多寡排序，「其他」放最後）
   const cnt = {};
-  for (const i of items) if (i.status !== 'drop' && !isShop(i)) cnt[i.category || '未分類'] = (cnt[i.category || '未分類'] || 0) + 1;
+  for (const i of items) if (i.status !== 'drop' && !isShop(i) && !i.manual) cnt[i.category || '未分類'] = (cnt[i.category || '未分類'] || 0) + 1;
   const cats = Object.keys(cnt).sort((a, b) => (a === '其他') - (b === '其他') || cnt[b] - cnt[a]);
   if (catSel !== 'all' && !cnt[catSel]) catSel = 'all';
   const total = Object.values(cnt).reduce((s, n) => s + n, 0);
@@ -848,7 +1210,7 @@ function renderList() {
     .map(([k, l, n]) => `<button type="button" role="tab" data-act="catSel" data-c="${esc(k)}" aria-selected="${catSel === k}">${esc(l)} <span class="n">${n}</span></button>`).join('');
   calcRec();
   const q = norm($('#listQ').value), c = catSel;
-  const inCat = items.filter((i) => !isShop(i) && (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)));
+  const inCat = items.filter((i) => !isShop(i) && !i.manual && (c === 'all' || (i.category || '未分類') === c) && (!q || norm(`${i.name} ${i.category} ${i.shop} ${i.summary} ${i.note}`).includes(q)));
   // 等級篩選：件數依目前類別與搜尋條件計算
   const gc = { S: 0, A: 0, B: 0, C: 0 };
   inCat.forEach((i) => { if (gc[i.grade] != null) gc[i.grade]++; });
@@ -1191,6 +1553,8 @@ const ACT = {
   // 橋接頁
   brOpen(b) { const i = items.find((x) => x.id === b.dataset.id); if (i) brDlg(i); },
   brSave(b) { brSave(b); },
+  brAdjReset() { brAdjSet({}); brProcess(); $('#dlg')._brRedraw?.(); },
+  brPhotoDel() { const d = $('#dlg'); d._brImg = null; d._brOrig = null; d._brPhoto = null; const f = $('#brPhoto'); if (f) f.value = ''; d._brRedraw?.(); },
   brMock(b) { const d = $('#dlg'); d._brMock = b.dataset.m; $$('[data-act="brMock"]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); const i = items.find((x) => x.id === $('[data-act="brSave"]')?.dataset.id); if (i) brMockDraw(i); },
   brCopyUrl(b) { if (b.dataset.u) copy(b.dataset.u, b); },
   brCopy(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && brLive(i)) copy(bridgeUrl(i), b); },
@@ -1205,12 +1569,19 @@ const ACT = {
     try { await bridgeApi({ action: 'hide', code: b.dataset.c }, b); toast('已從點擊統計刪除'); renderStats(); } catch (e) { toast(e.message); }
   },
   // 新增賣場
-  shopNew() { shopDlg(); },
+  shopNew() { shopDlg(pubKind); },
+  addNew() { shopDlg(pubKind); },
+  addKind(b) { if (!b.disabled) shopDlg(b.dataset.k); },
   async shopGen() {
     const btn = $('#shopGenBtn'); if (!btn || btn.disabled) return;
+    const kind = $('#dlg')._addKind === 'item' ? 'item' : 'shop', label = kind === 'shop' ? '賣場' : '商品', max = kind === 'shop' ? 60 : 120;
     const name = $('#shopName').value.trim(), url = $('#shopUrl').value.trim();
     const n = [...name].length;
-    const errN = !name ? '請輸入賣場名稱' : n > 60 ? `賣場名稱最多 60 字（目前 ${n} 字）` : '';
+    const errN = !name ? `請輸入${label}名稱` : n > max ? `${label}名稱最多 ${max} 字（目前 ${n} 字）` : '';
+    const priceRaw = $('#addPrice')?.value.trim() || '', price = priceRaw === '' ? 0 : Number(priceRaw), cat = $('#addCat')?.value.trim() || '';
+    const errP = priceRaw !== '' && !(price >= 0 && price < 1e8) ? '價格請填 0 以上的數字' : '';
+    { const e = $('#addPriceErr'); if (e) { e.textContent = errP; e.hidden = !errP; } }
+    if (errP) { $('#addPrice').focus(); return; }
     const errU = !url ? '請輸入分潤連結' : !isHttpUrl(url) ? '分潤連結必須是 http:// 或 https:// 開頭的完整網址（中間不能有空白）' : url.length > 2000 ? '分潤連結太長（最多 2000 字元）' : '';
     for (const [id, msg] of [['shopNameErr', errN], ['shopUrlErr', errU]]) { const e = document.getElementById(id); e.textContent = msg; e.hidden = !msg; }
     $('#shopName').setAttribute('aria-invalid', String(!!errN)); $('#shopUrl').setAttribute('aria-invalid', String(!!errU));
@@ -1219,10 +1590,13 @@ const ACT = {
     let i = items.find((x) => x.id === btn.dataset.id);
     if (!i) {
       const now = new Date().toISOString();
-      i = { id: 'shop_' + uid(), kind: 'shop', name, shop: name, aff: url, category: '賣場', platform: 'fb', status: 'todo', queuedAt: now, createdAt: now, note: '' };
+      i = kind === 'shop'
+        ? { id: 'shop_' + uid(), kind: 'shop', name, shop: name, aff: url, category: '賣場', platform: 'fb', status: 'todo', queuedAt: now, createdAt: now, note: '' }
+        : { id: 'man_' + uid(), manual: true, name, price, category: cat || '未分類', aff: url, shop: '', platform: 'fb', status: 'todo', queuedAt: now, createdAt: now, note: '' };
       items.push(i); btn.dataset.id = i.id;
-    } else { i.name = name; i.shop = name; i.aff = url; }
-    pubKind = 'shop'; store.set('pubKind', 'shop'); pubSel = 'all'; save.i();
+      $$('[data-act="addKind"]').forEach((x) => { x.disabled = true; });   // 已建立後不能再切換種類
+    } else { i.name = name; i.aff = url; if (kind === 'shop') i.shop = name; else { i.price = price; i.category = cat || '未分類'; } }
+    pubKind = kind; store.set('pubKind', kind); pubSel = 'all'; save.i();
     const want = $('#festOn').checked, fest = want ? ($('#festText').value.trim() || festAuto()) : '';
     const el = $('#dlgOut'); loading(el);
     try {
@@ -1268,10 +1642,12 @@ document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
   else if (t.id === 'festOn') { S.festOn = t.checked; save.s(); }
-  else if (t.name === 'brTpl') $('#dlg')._brRedraw?.();
+  else if (t.name === 'brSty' || t.name === 'brFit' || t.id === 'brPhotoOnly' || t.id === 'brShowName') $('#dlg')._brRedraw?.();
+  else if (t.id === 'brCut') { brProcess(); $('#dlg')._brRedraw?.(); }
+  else if (t.id === 'brPhoto') brLoadPhoto(t.files?.[0]);
   else if (t.id === 'statFrom' || t.id === 'statTo') renderStats(false);
-  else if (t.id === 'brHeadSel' && t.value !== '') { $('#brHead').value = [...$('#dlg')._brSrc.heads[+t.value]].slice(0, 40).join(''); $('#dlg')._brRedraw?.(); }
-  else if (t.id === 'brSubSel' && t.value !== '') { const p = $('#dlg')._brSrc.posts[+t.value]; $('#brSub').value = brShort(p); $('#brDesc').value = noTags(p).slice(0, 300); $('#dlg')._brRedraw?.(); }
+  else if (t.id === 'brHeadSel' && t.value !== '') { $('#brHead').value = [...$('#dlg')._brSrc.heads[+t.value]].slice(0, 40).join(''); $('#brHead').dispatchEvent(new Event('input', { bubbles: true })); }
+  else if (t.id === 'brSubSel' && t.value !== '') { const p = $('#dlg')._brSrc.posts[+t.value]; $('#brSub').value = brShort(p); $('#brDesc').value = noTags(p).replace(/\s+/g, ' ').slice(0, 300); $('#dlg')._brRedraw?.(); }
   else if (t.matches('[data-ppick]')) { if (t.checked) pubPicked.add(t.dataset.ppick); else pubPicked.delete(t.dataset.ppick); updPubBtns(); }
   else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
   else if (t.matches('[data-imp]') && t.files.length) {
@@ -1296,8 +1672,12 @@ document.addEventListener('change', async (e) => {
     if (location.hash !== '#list') location.hash = '#list'; else route();
   } else if (t.id === 'listSort') renderList();
 });
+let brAdjT;
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.id === 'brHead') { const h = $('#brSlugHint'), v = slugify(t.value); if (h) h.textContent = `橋接網址：${location.host}/${v || '（填入圖上大字後產生）'}`; }
+  if (/^br(Z|Px|Py)$/.test(t.id)) { $('#dlg')._brRedraw?.(); return; }
+  if (/^br(Ct|Cb|Cl|Cr|Tol)$/.test(t.id)) { brAdjOut(); clearTimeout(brAdjT); brAdjT = setTimeout(() => { brProcess(); $('#dlg')._brRedraw?.(); }, 90); return; }
   if (t.closest?.('#dlg') && /^(brHead|brSub|brTitle|brDesc)$/.test(t.id)) { $('#dlg')._brRedraw?.(); return; }
   if (t.id === 'listQ') renderList();
   else if (t.dataset.sw) { wSum(); $('#saveMsg').textContent = '尚未儲存'; }
