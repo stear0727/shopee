@@ -24,6 +24,7 @@
   <a href="#list" data-v="list" title="商品分析"><span class="ic" aria-hidden="true">📦</span><span class="lb">商品分析</span></a>
   <a href="#pub" data-v="pub" title="發布清單"><span class="ic" aria-hidden="true">📝</span><span class="lb">發布清單</span></a>
   <a href="#video" data-v="video" title="影片製作"><span class="ic" aria-hidden="true">🎬</span><span class="lb">影片製作</span></a>
+  <a href="#stats" data-v="stats" title="點擊統計"><span class="ic" aria-hidden="true">📊</span><span class="lb">點擊統計</span></a>
   <a href="#settings" data-v="settings" title="設定"><span class="ic" aria-hidden="true">⚙️</span><span class="lb">設定</span></a>
 </nav>
 
@@ -84,6 +85,24 @@
   <h1 tabindex="-1">影片製作</h1>
   <p class="hint">把你拍的商品實拍影片剪成 9:16、14–19 秒的特色銷售短影音：依提示詞由 AI 設計風格、分鏡與文案，自動加入轉場，配樂與音效由程式合成，直接在瀏覽器輸出 MP4。影片只存在這台瀏覽器，不會上傳。</p>
   <div id="vidBody"></div>
+</section>
+
+<!-- 點擊統計 -->
+<section id="v-stats" class="view" hidden>
+  <h1 tabindex="-1">點擊統計</h1>
+  <p class="hint">每個橋接頁被真人點進來的次數（不含 Threads 等平台的預覽抓取）。這是經過你網站的點擊數，不等於蝦皮的實際成交。</p>
+  <div class="toolbar stat-bar">
+    <div class="tabs cat-tabs" role="tablist" aria-label="日期範圍" id="statRange">
+      <button type="button" role="tab" data-act="statRange" data-r="today" aria-selected="false">今日</button>
+      <button type="button" role="tab" data-act="statRange" data-r="7" aria-selected="true">近 7 天</button>
+      <button type="button" role="tab" data-act="statRange" data-r="30" aria-selected="false">近一個月</button>
+      <button type="button" role="tab" data-act="statRange" data-r="all" aria-selected="false">全部</button>
+      <button type="button" role="tab" data-act="statRange" data-r="custom" aria-selected="false">自訂</button>
+    </div>
+    <span id="statCustom" class="stat-custom" hidden><input type="date" id="statFrom" aria-label="開始日期"> ～ <input type="date" id="statTo" aria-label="結束日期"></span>
+    <button type="button" data-act="statsRefresh">重新整理</button>
+  </div>
+  <div id="statsBody"></div>
 </section>
 
 <!-- 設定 -->

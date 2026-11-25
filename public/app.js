@@ -200,7 +200,7 @@ function outCard(key, html, j, text) {
   const src = (j.sources || []).filter((s) => safeUrl(s.uri));
   return `<div class="card"><div class="out-head"><button type="button" data-act="copy" data-k="${key}">複製</button></div>${html}
   ${src.length ? `<h3>來源</h3><ul>${src.map((s) => `<li><a href="${esc(s.uri)}" target="_blank" rel="noopener noreferrer">${esc(s.title)}</a></li>`).join('')}</ul>` : ''}
-  <p class="hint">模型：${esc(j.model)}｜AI 內容僅供參考，數字與規則請自行查證；發文請揭露含分潤連結。</p></div>`;
+  <p class="hint">模型：${esc(j.model)}｜AI 內容僅供參考，數字與規則請自行查證。</p></div>`;
 }
 // 複製：成功後按鈕本身短暫顯示「已複製」；對話框開啟時頁面其他區域不可互動，備援的 textarea 要放進對話框
 async function copy(text, btn) {
@@ -343,8 +343,8 @@ function importItems(rows) {
   save.i(); return n;
 }
 /* ========== 路由 ========== */
-const VIEWS = ['list', 'pub', 'settings'];
-const RENDER = { list: renderList, pub: renderPub, settings: renderSettings };
+const VIEWS = ['list', 'pub', 'stats', 'settings'];
+const RENDER = { list: renderList, pub: renderPub, stats: () => renderStats(), settings: renderSettings };
 function route() {
   let v = location.hash.slice(1); if (!VIEWS.includes(v)) v = 'list';
   $$('.view').forEach((s) => { s.hidden = s.id !== 'v-' + v; });
@@ -370,24 +370,49 @@ function aiTxt(x) {
   const t = String(x).trim();
   return /^(null|undefined|none|n\/a)*$/i.test(t) ? '' : t;
 }
+// Threads 版型：開頭一行、空一行、每句一行的內文、空一行、行動呼籲；hashtag 放最後一行
+// （AI 已照版型換行時只整理 hashtag；舊文案沒換行時自動分句）。不顯示「含分潤連結」等揭露標籤
+const EMO = '(?:\\p{Extended_Pictographic}\\uFE0F?|[\\u{1F3FB}-\\u{1F3FF}]|\\u200D)';
+const DISCLOSE = /#?含分潤連結|#分潤連結/g;
+function lineify(s, threads = true) {
+  s = String(s || '').replace(/\r/g, '').replace(DISCLOSE, '').trim(); if (!s) return s;
+  const tags = s.match(/#[^\s#]+/g) || [];
+  let body = s.replace(/#[^\s#]+/g, '').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim();
+  if (!body.includes('\n')) {
+    body = body.replace(new RegExp(`([。！？!?]+[」』）)]*(?:\\s*${EMO})*)\\s*(?=\\S)`, 'gu'), '$1\n');
+    // 舊文案補上 Threads 段落：開頭後、行動呼籲前各空一行
+    const L = body.split('\n').map((x) => x.trim()).filter(Boolean);
+    if (threads && L.length >= 3) body = [L[0], '', ...L.slice(1, -1), '', L[L.length - 1]].join('\n');
+    else body = L.join('\n');
+  }
+  // 每一行結尾不留「。」「，」（後面接的表情符號保留）
+  const endP = new RegExp(`[。，,、]+((?:\\s*${EMO})*)\\s*$`, 'u');
+  body = body.split('\n').map((x) => x.trim().replace(endP, '$1')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return tags.length ? `${body}\n\n${tags.join(' ')}` : body;
+}
 function renderAnalyze(j, p) {
   const o = j.json, sub = subId(p);
   const L = (a) => { const v = (Array.isArray(a) ? a : []).map(aiTxt).filter(Boolean); return v.length ? `<ul>${v.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="muted">（無）</p>'; };
   let h, t;
   const aff = safeUrl(p.aff) ? p.aff : '';
   if (aff) outText.aff = aff;
-  const affH = aff ? `<h3>分潤連結</h3><div class="post"><p>${esc(aff)}</p><button type="button" data-act="copy" data-k="aff">複製</button></div>` : '';
+  const brU = brLive(p) ? bridgeUrl(p) : '';
+  if (brU) outText.bridge = brU;
+  const affH = (aff ? `<h3>分潤連結</h3><div class="post"><p>${esc(aff)}</p><button type="button" data-act="copy" data-k="aff">複製</button></div>` : '')
+    + (brU ? `<h3>橋接網址（貼文用，顯示美編預覽卡片）</h3><div class="post"><p>${esc(brU)}</p><button type="button" data-act="copy" data-k="bridge">複製</button></div>` : '');
   if (o && typeof o === 'object' && !Array.isArray(o)) {
     const str = aiTxt;
-    const posts = (Array.isArray(o.posts) ? o.posts : []).filter((x) => typeof x === 'string' && x.trim()).slice(0, 5);
+    // AI 偶爾把每則貼文包成物件（例如 {type, text}），取出文字內容
+    const postText = (x) => (typeof x === 'string' ? x : x && typeof x === 'object' ? String(x.text || x.post || x.content || x.body || '') : '');
+    const posts = (Array.isArray(o.posts) ? o.posts : []).map(postText).filter((x) => x.trim()).slice(0, 5).map(lineify);
     posts.forEach((x, n) => { outText['post' + n] = x; });
-    const long = typeof o.longPost === 'string' ? o.longPost.trim() : '';
+    const long = typeof o.longPost === 'string' ? lineify(o.longPost, false) : '';
     if (long) outText.postLong = long;
     const car = Array.isArray(o.carousel) ? o.carousel : [];
-    const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).map(aiTxt).filter(Boolean).join(' ');
+    const tags = (Array.isArray(o.hashtags) ? o.hashtags : []).map(aiTxt).map((x) => x.replace(DISCLOSE, '').trim()).filter((x) => x && x !== '#').join(' ');
     outText.tags = tags;
     const replies = Array.isArray(o.replies) ? o.replies : [];
-    const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' && o.festivalPost.post.trim() ? o.festivalPost : null;
+    const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' && o.festivalPost.post.trim() ? { ...o.festivalPost, post: lineify(o.festivalPost.post) } : null;
     if (fp) outText.postFest = fp.post;
     h = `<p class="verdict">${esc(aiTxt(o.verdict))}</p>
     ${fp ? `<h3>🎉 節慶活動文案（${esc(fp.festival || '近期節慶')}）</h3><div class="post fest"><p>${esc(fp.post)}</p><button type="button" data-act="copy" data-k="postFest">複製</button></div>` : ''}
@@ -404,7 +429,7 @@ function renderAnalyze(j, p) {
     ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
     const ls = (a) => (Array.isArray(a) ? a.map(aiTxt).filter(Boolean).map((x) => `- ${x}`).join('\n') : '');
-    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}${aff ? `分潤連結\n${aff}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}${aff ? `分潤連結\n${aff}\n\n` : ''}${brU ? `橋接網址\n${brU}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>${affH}`; t = j.text + (aff ? `\n\n分潤連結：${aff}` : '') + `\n\nSub_id：${sub}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
   return outCard('analyze', h, j, t);
@@ -527,6 +552,7 @@ function pubRow(i) {
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
     ${pubTimeHtml(i)}
     ${bestTimeOf(i) ? `<div class="besttime"><b>⏰ 文案建議時段</b><span>${esc(bestTimeOf(i))}</span></div>` : ''}
+    ${bridgeHtml(i)}
     <div class="acts">
       ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button><button type="button" data-act="schedOpen" data-id="${id}">${okSlot(i.schedAt) ? '修改排定時間' : '排定時間'}</button>`}
       ${safeUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製推廣連結</button>` : ''}
@@ -547,6 +573,7 @@ function shopRow(i) {
     ${i.aiAt ? `<div class="sm aiat">📝 文案產生於 ${fmtDT(i.aiAt)}</div>` : ''}
     ${pubTimeHtml(i)}
     ${bestTimeOf(i) ? `<div class="besttime"><b>⏰ 文案建議時段</b><span>${esc(bestTimeOf(i))}</span></div>` : ''}
+    ${bridgeHtml(i)}
     <div class="acts">
       ${done ? `<span class="btn btn-done" role="status">✓ 已發布</span><button type="button" class="danger" data-act="unpublish" data-id="${id}">取消已發布</button>` : `<button type="button" data-act="publish" data-id="${id}">標記已發布</button><button type="button" data-act="schedOpen" data-id="${id}">${okSlot(i.schedAt) ? '修改排定時間' : '排定時間'}</button>`}
       ${isHttpUrl(i.aff) ? `<button type="button" data-act="copyAff" data-id="${id}">複製分潤連結</button>` : ''}
@@ -573,6 +600,241 @@ function shopDlg() {
 }
 // 刪除賣場（同步時會自動記入刪除紀錄，另一台裝置同步後也會刪除）
 function dropShops(ids) { items = items.filter((x) => !ids.has(x.id)); for (const id of ids) pubPicked.delete(id); }
+
+
+/* ========== 橋接頁（Threads 等平台的預覽卡片；真人點進來立刻轉到蝦皮） ==========
+ * i.bridge：{ code, at, title, head, sub, desc, tpl }；網址為 /s/<code>，建立後永久有效（沒有停用）
+ */
+const SHOPEE_HOST = /(^|\.)shopee\.(tw|com|sg|ph|vn|com\.my|co\.th|co\.id|com\.br|com\.mx|com\.co|cl)$|^(shp\.ee|shope\.ee)$/i;
+const okDest = (u) => { try { const x = new URL(String(u)); return (x.protocol === 'https:' || x.protocol === 'http:') && SHOPEE_HOST.test(x.hostname); } catch { return false; } };
+const bridgeUrl = (i) => (i?.bridge?.code ? `${location.origin}/s/${i.bridge.code}` : '');
+const brLive = (i) => !!i?.bridge?.code;
+async function bridgeApi(body, btn) {
+  const h = { 'Content-Type': 'application/json' }; if (S.accessCode) h['x-access-code'] = S.accessCode;
+  const label = btn?.textContent; if (btn) { btn.disabled = true; btn.textContent = '處理中…'; }
+  try {
+    const r = await fetch('/api/bridge', { method: 'POST', headers: h, body: JSON.stringify(body) });
+    let j; try { j = await r.json(); } catch { j = { ok: false, error: `伺服器回應格式錯誤（HTTP ${r.status}）` }; }
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    return j;
+  } catch (e) { if (e instanceof TypeError) e.message = '無法連線到伺服器（本機直接開檔沒有後端，請用 netlify dev 或部署後使用）'; throw e; }
+  finally { if (btn) { btn.disabled = false; btn.textContent = label; } }
+}
+// 卡片上的橋接頁區塊（只支援蝦皮連結）
+function bridgeHtml(i) {
+  if (!okDest(i.aff)) return '';
+  const id = esc(i.id);
+  if (!brLive(i)) return `<div class="bridge"><button type="button" data-act="brOpen" data-id="${id}">🔗 建立橋接頁</button></div>`;
+  return `<div class="bridge on"><b>🔗 橋接頁</b><span class="brurl">${esc(bridgeUrl(i).replace(/^https?:\/\//, ''))}</span>
+    <div class="acts"><button type="button" data-act="brCopy" data-id="${id}">複製橋接網址</button><button type="button" data-act="brOpen" data-id="${id}">編輯預覽圖</button></div></div>`;
+}
+// 從 AI 文案取出可用的大字（吸睛第一句）與短貼文
+const noTags = (s) => String(s || '').replace(/#[^\s#]+/g, '').replace(/\s+/g, ' ').trim();
+function brSrc(i) {
+  const o = i.aiData?.json || {}, arr = (a) => (Array.isArray(a) ? a : []).map(aiTxt).map((x) => x.trim()).filter(Boolean);
+  return { heads: arr(o.headlines || o.hooks).map(noTags), posts: arr(o.posts) };
+}
+// 短文案精華：去掉 hashtag，取前面幾句，約 40 字
+function brShort(s) {
+  // 圖上文字同樣不留句尾的「。」「，」
+  const t = noTags(s).replace(/[。]+\s*/g, ' ').replace(/[，,、]+\s*$/, '').trim(); if ([...t].length <= 40) return t;
+  let out = ''; for (const part of t.split(/(?<=[！？!?\s])/)) { if ([...(out + part)].length > 40) break; out += part; }
+  out = out.trim();
+  return out || [...t].slice(0, 39).join('') + '…';
+}
+// 預覽圖模板（1200×630）
+function drawBridge(c, o) {
+  const x = c.getContext('2d'), W = 1200, H = 630, dark = o.tpl === 'dark';
+  const F = '"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif';
+  const C = dark ? { bg1: '#2b211d', bg2: '#140f0d', acc: '#ff8a5c', fg: '#fff7f0', mut: '#f1d9cb', bar: 'rgba(0,0,0,0.45)' } : { bg1: '#fff6ef', bg2: '#ffd6c2', acc: '#c62938', fg: '#1f1a17', mut: '#5c4a40', bar: 'rgba(255,255,255,0.78)' };
+  let g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, C.bg1); g.addColorStop(1, C.bg2); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  x.fillStyle = dark ? 'rgba(255,138,92,0.10)' : 'rgba(198,41,56,0.08)'; x.beginPath(); x.arc(1080, 90, 260, 0, Math.PI * 2); x.fill(); x.beginPath(); x.arc(120, 600, 180, 0, Math.PI * 2); x.fill();
+  x.fillStyle = C.acc; x.fillRect(0, 0, 18, H);
+  const wrap = (t, font, maxW, maxLines) => {
+    x.font = font; const out = []; let cur = '';
+    for (const ch of [...String(t || '')]) { if (ch === '\n') { out.push(cur); cur = ''; continue; } if (x.measureText(cur + ch).width > maxW && cur) { out.push(cur); cur = ch; } else cur += ch; }
+    if (cur) out.push(cur);
+    if (out.length > maxLines) { out.length = maxLines; let l = out[maxLines - 1]; while (l && x.measureText(l + '…').width > maxW) l = [...l].slice(0, -1).join(''); out[maxLines - 1] = l + '…'; }
+    return out;
+  };
+  const hf = `900 74px ${F}`, sf = `500 40px ${F}`;
+  const hl = wrap(o.head, hf, 1060, 2), sl = wrap(o.sub, sf, 1060, 3);
+  const hH = hl.length * 92, sH = sl.length * 58, gap = hl.length && sl.length ? 28 : 0;
+  let y = Math.max(60, (520 - (hH + gap + sH)) / 2);
+  x.textBaseline = 'top'; x.textAlign = 'left';
+  x.font = hf; x.fillStyle = C.fg; hl.forEach((l, k) => x.fillText(l, 70, y + k * 92)); y += hH + gap;
+  x.font = sf; x.fillStyle = C.mut; sl.forEach((l, k) => x.fillText(l, 70, y + k * 58));
+  // 下方：名稱
+  x.fillStyle = C.bar; x.fillRect(18, 530, W - 18, 100);
+  x.textBaseline = 'middle'; x.textAlign = 'left'; x.fillStyle = C.fg;
+  const name = wrap(`${o.kind === 'shop' ? '🏪' : '🛍️'} ${o.name}`, `800 34px ${F}`, W - 140, 1)[0] || '';
+  x.font = `800 34px ${F}`; x.fillText(name, 70, 581);
+}
+function brDlg(i) {
+  const src = brSrc(i), b = i.bridge || {}, d = $('#dlg');
+  const head = b.head ?? (src.heads[0] || ''), sub = b.sub ?? brShort(src.posts[0] || ''), desc = b.desc ?? noTags(src.posts[0] || '').slice(0, 300);
+  const opt = (arr, f) => arr.map((t, k) => `<option value="${k}">${esc([...f(t)].slice(0, 30).join(''))}</option>`).join('');
+  d.innerHTML = `<div class="dlg-head"><h2>🔗 橋接頁｜${esc(i.name)}</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
+    <canvas id="brCv" width="1200" height="630" hidden></canvas>
+    <div class="tabs cat-tabs" role="tablist" aria-label="預覽樣式"><button type="button" role="tab" data-act="brMock" data-m="threads" aria-selected="true">Threads 預覽</button><button type="button" role="tab" data-act="brMock" data-m="fb" aria-selected="false">Facebook 預覽</button></div>
+    <div id="brMock" class="mock threads"></div>
+    <div class="checks" role="radiogroup" aria-label="模板"><label><input type="radio" name="brTpl" value="warm"${b.tpl !== 'dark' ? ' checked' : ''}>暖色</label><label><input type="radio" name="brTpl" value="dark"${b.tpl === 'dark' ? ' checked' : ''}>深色</label></div>
+    <label>預覽卡片標題<input id="brTitle" maxlength="80" value="${esc(b.title ?? i.name)}"></label>
+    <label>圖上大字（約 16 字）${src.heads.length ? `<select id="brHeadSel"><option value="">從吸睛第一句帶入…</option>${opt(src.heads, (t) => t)}</select>` : ''}<input id="brHead" maxlength="40" value="${esc(head)}" placeholder="例如：保養品補貨就趁現在"></label>
+    <label>圖上小字（約 40 字）${src.posts.length ? `<select id="brSubSel"><option value="">從短貼文帶入…</option>${opt(src.posts, noTags)}</select>` : ''}<textarea id="brSub" rows="2" maxlength="80">${esc(sub)}</textarea></label>
+    <label>卡片說明文字（顯示在預覽圖下方）<textarea id="brDesc" rows="3" maxlength="300">${esc(desc)}</textarea></label>
+    ${src.heads.length || src.posts.length ? '' : '<p class="hint">這件還沒有 AI 文案，可以先手動填寫，或先按「產生文案」再回來帶入。</p>'}
+    <p class="hint">真人點進橋接網址會立刻轉到${i.kind === 'shop' ? '賣場' : '商品頁'}。預覽圖與標題請如實反映要去的${i.kind === 'shop' ? '賣場' : '商品'}。</p>
+    <p id="brErr" class="ferr" role="alert" hidden></p>
+    <div class="btns"><button type="button" class="pri" data-act="brSave" data-id="${esc(i.id)}">${brLive(i) ? '更新橋接頁' : '發布橋接頁'}</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>`;
+  if (!d.open) d.showModal();
+  const redraw = () => { drawBridge($('#brCv'), { tpl: $('input[name="brTpl"]:checked')?.value, head: $('#brHead').value.trim(), sub: $('#brSub').value.trim(), name: i.name, kind: i.kind }); brMockDraw(i); };
+  d._brRedraw = redraw; d._brSrc = src; d._brMock = 'threads'; redraw();
+}
+// 模擬貼文裡的連結卡片外觀（Threads／Facebook）；實際樣子以平台顯示為準
+function brMockDraw(i) {
+  const d = $('#dlg'), el = $('#brMock'); if (!el) return;
+  const img = $('#brCv').toDataURL('image/jpeg', 0.8), title = $('#brTitle').value.trim(), desc = $('#brDesc').value.trim().replace(/\s+/g, ' ');
+  const host = (location.host || 'example.com'), m = d._brMock || 'threads';
+  el.className = `mock ${m}`;
+  el.innerHTML = m === 'fb'
+    ? `<div class="mk-post"><div class="mk-user"><span class="mk-av"></span><b>你的粉專</b><span class="mk-mut">· 剛剛</span></div><p class="mk-txt">（貼文內容）</p>
+       <div class="mk-card"><img src="${img}" alt=""><div class="mk-meta"><span class="mk-host">${esc(host.toUpperCase())}</span><b class="mk-title">${esc(title)}</b><span class="mk-desc">${esc(desc)}</span></div></div></div>`
+    : `<div class="mk-post"><div class="mk-user"><span class="mk-av"></span><b>你的帳號</b><span class="mk-mut">剛剛</span></div><p class="mk-txt">（貼文內容）</p>
+       <div class="mk-card"><img src="${img}" alt=""><div class="mk-meta"><span class="mk-host">${esc(host)}</span><b class="mk-title">${esc(title)}</b></div></div></div>`;
+}
+async function brSave(b) {
+  const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
+  const title = $('#brTitle').value.trim(), head = $('#brHead').value.trim(), sub = $('#brSub').value.trim(), desc = $('#brDesc').value.trim(), tpl = $('input[name="brTpl"]:checked')?.value === 'dark' ? 'dark' : 'warm';
+  const err = !title ? '請填寫預覽卡片標題' : !head ? '請填寫圖上大字' : !okDest(i.aff) ? '橋接頁只支援蝦皮的連結（shopee／shp.ee）' : '';
+  const e = $('#brErr'); e.textContent = err; e.hidden = !err; if (err) return;
+  const cv = $('#brCv'); drawBridge(cv, { tpl, head, sub, name: i.name, kind: i.kind });
+  try {
+    const j = await bridgeApi({ action: 'save', code: i.bridge?.code || '', kind: i.kind === 'shop' ? 'shop' : 'item', title, desc, dest: i.aff, image: cv.toDataURL('image/jpeg', 0.88) }, b);
+    i.bridge = { code: j.code, at: j.at, title, head, sub, desc, tpl };
+    save.i(); $('#dlg').close(); route(); toast('橋接頁已發布，可按「複製橋接網址」貼到貼文');
+  } catch (er) { e.textContent = er.message; e.hidden = false; }
+}
+
+/* ========== 點擊統計（只計算經過橋接頁的真人點擊） ========== */
+const dayKeys = (today, n) => { const t = Date.parse(today + 'T00:00:00Z'); return Array.from({ length: n }, (_, k) => new Date(t - k * 864e5).toISOString().slice(0, 10)); };
+let statsCache = null, statRange = '7';
+// 日期範圍 → 判斷某天（台灣日期 YYYY-MM-DD）是否在範圍內
+function statInRange(today) {
+  if (statRange === 'all') return () => true;
+  if (statRange === 'custom') {
+    let f = $('#statFrom').value || '0000-00-00', t = $('#statTo').value || '9999-99-99';
+    if (f > t) [f, t] = [t, f];
+    return (d) => d >= f && d <= t;
+  }
+  const keys = new Set(dayKeys(today, statRange === 'today' ? 1 : Number(statRange)));
+  return (d) => keys.has(d);
+}
+const statLabel = () => ({ today: '今日', 7: '近 7 天', 30: '近一個月', all: '全部期間' }[statRange] || (() => {
+  const f = $('#statFrom').value, t = $('#statTo').value;
+  return f || t ? `${f || '最早'} ～ ${t || '今天'}` : '自訂（請選日期）';
+})());
+// ---- 點擊統計圖表（純 SVG／HTML，不載入外部程式） ----
+const dAdd = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+const dSpan = (a, b) => { const out = []; for (let d = a; d <= b && out.length < 400; d = dAdd(d, 1)) out.push(d); return out; };
+const mdd = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
+// 趨勢圖要畫的日期：今日→近 7 天（單日畫不出趨勢）；全部→從第一次點擊到今天；自訂→選的區間（最多 400 天）
+function statTrendDays(today, agg) {
+  if (statRange === 'today' || statRange === '7') return dSpan(dAdd(today, -6), today);
+  if (statRange === '30') return dSpan(dAdd(today, -29), today);
+  if (statRange === 'custom') {
+    let f = $('#statFrom').value || '', t = $('#statTo').value || today;
+    if (f && f > t) [f, t] = [t, f];
+    if (!f) f = Object.keys(agg).sort()[0] || dAdd(t, -29);
+    return dSpan(f, t).slice(-400);
+  }
+  const first = Object.keys(agg).sort()[0] || dAdd(today, -29);
+  return dSpan(first < dAdd(today, -29) ? first : dAdd(today, -29), today).slice(-400);
+}
+const niceStep = (v) => { const raw = Math.max(1, v / 4), p = 10 ** Math.floor(Math.log10(raw)), m = raw / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+function trendSvg(days, agg, today) {
+  const W = Math.round(Math.max(300, Math.min(1100, ($('#statsBody')?.clientWidth || 640) - 36))), H = W < 520 ? 200 : 240, L = 36, R = 12, T = 12, B = 28, iw = W - L - R, ih = H - T - B;
+  const vals = days.map((d) => agg[d] || 0), n = days.length, stp = niceStep(Math.max(...vals, 0)), mx = stp * Math.max(1, Math.ceil(Math.max(...vals, 0) / stp));
+  const x = (k) => L + (n === 1 ? iw / 2 : (k * iw) / (n - 1)), y = (v) => T + ih - (v / mx) * ih;
+  const grid = Array.from({ length: Math.round(mx / stp) + 1 }, (_, k) => k * stp).map((v) => { const yy = y(v); return `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="ch-grid"/><text x="${L - 6}" y="${yy}" class="ch-ax" text-anchor="end" dominant-baseline="middle">${fmt(v)}</text>`; }).join('');
+  const step = Math.max(1, Math.ceil(n / (W < 520 ? 4 : 7)));
+  const xl = days.map((d, k) => (k % step === 0 || k === n - 1) && !(k !== n - 1 && n - 1 - k < step / 2) ? `<text x="${x(k)}" y="${H - 8}" class="ch-ax" text-anchor="middle">${d === today ? '今天' : mdd(d)}</text>` : '').join('');
+  const pts = vals.map((v, k) => `${x(k).toFixed(1)},${y(v).toFixed(1)}`);
+  const area = `M${x(0)},${y(0)} L${pts.join(' L')} L${x(n - 1)},${y(0)} Z`;
+  const dots = n <= 45 ? vals.map((v, k) => `<circle cx="${x(k)}" cy="${y(v)}" r="4" class="ch-dot"/>`).join('') : '';
+  const hw = n === 1 ? iw : iw / (n - 1);
+  const hits = days.map((d, k) => `<g class="ch-hit"><rect x="${x(k) - hw / 2}" y="${T}" width="${hw}" height="${ih}"/><line x1="${x(k)}" x2="${x(k)}" y1="${T}" y2="${T + ih}"/><circle cx="${x(k)}" cy="${y(vals[k])}" r="6"/><title>${mdd(d)}${d === today ? '（今天）' : ''}：${fmt(vals[k])} 次點擊</title></g>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="ch-svg" role="img" aria-label="每日點擊趨勢，${mdd(days[0])} 到 ${mdd(days[n - 1])}，合計 ${fmt(vals.reduce((a, b) => a + b, 0))} 次">${grid}${xl}<path d="${area}" class="ch-area"/><polyline points="${pts.join(' ')}" class="ch-line"/>${dots}${hits}</svg>`;
+}
+function hbars(list, cls = '') {
+  const mx = Math.max(1, ...list.map((r) => r.v));
+  return `<ol class="ch-bars ${cls}">${list.map((r) => `<li title="${esc(r.label)}：${fmt(r.v)} 次"><span class="ch-lab">${esc(r.label)}</span><span class="ch-track"><span class="ch-fill" data-w="${r.v ? Math.max(2, (r.v / mx) * 100).toFixed(1) : 0}"></span></span><b>${fmt(r.v)}</b></li>`).join('')}</ol>`;
+}
+function statCharts(rows, j, inR, lab) {
+  const agg = {}; for (const r of rows) for (const [d, n] of Object.entries(r.s.days || {})) agg[d] = (agg[d] || 0) + n;
+  const days = statTrendDays(j.today, agg), tsum = days.reduce((t, d) => t + (agg[d] || 0), 0);
+  const avg = days.length ? tsum / days.length : 0, peak = days.reduce((b, d) => ((agg[d] || 0) > (agg[b] || 0) ? d : b), days[0]);
+  // 排行：區間內點擊最多的前 8 名
+  const top = rows.filter((r) => r.range > 0).slice(0, 8).map((r) => ({ label: `${isShop(r.i) ? '🏪' : '🛍️'} ${r.i.name}`, v: r.range }));
+  // 商品／賣場占比
+  const it = rows.filter((r) => !isShop(r.i)).reduce((t, r) => t + r.range, 0), sh = rows.filter((r) => isShop(r.i)).reduce((t, r) => t + r.range, 0), all = it + sh;
+  const pct = (v) => (all ? Math.round((v / all) * 100) : 0);
+  // 星期分布（區間內）
+  const wk = [0, 0, 0, 0, 0, 0, 0]; for (const [d, n] of Object.entries(agg)) if (inR(d)) wk[new Date(d + 'T00:00:00Z').getUTCDay()] += n;
+  const wn = ['日', '一', '二', '三', '四', '五', '六'], wmx = Math.max(1, ...wk);
+  const trendNote = statRange === 'today' ? '（今日只有一天，趨勢顯示近 7 天）' : '';
+  return `<div class="ch-grid2">
+    <section class="card ch ch-wide"><h2 class="ch-h">每日點擊趨勢 <span class="muted sm">${mdd(days[0])} ～ ${mdd(days[days.length - 1])}${trendNote}</span></h2>
+      <p class="ch-kpi sm muted">合計 <b>${fmt(tsum)}</b> 次 · 日平均 <b>${avg.toFixed(1)}</b> 次 · 最高 <b>${peak && agg[peak] ? `${mdd(peak)}（${fmt(agg[peak])} 次）` : '—'}</b></p>
+      ${trendSvg(days, agg, j.today)}</section>
+    <section class="card ch"><h2 class="ch-h">點擊排行 <span class="muted sm">${esc(lab)}</span></h2>
+      ${top.length ? hbars(top) : '<p class="muted sm">這段期間還沒有點擊</p>'}</section>
+    <section class="card ch"><h2 class="ch-h">商品／賣場占比 <span class="muted sm">${esc(lab)}</span></h2>
+      ${all ? `<div class="ch-stack" role="img" aria-label="商品 ${pct(it)}%，賣場 ${pct(sh)}%">${it ? `<span class="c1" data-f="${it}" title="商品：${fmt(it)} 次（${pct(it)}%）"></span>` : ''}${sh ? `<span class="c2" data-f="${sh}" title="賣場：${fmt(sh)} 次（${pct(sh)}%）"></span>` : ''}</div>
+      <ul class="ch-leg"><li><i class="c1"></i>🛍️ 商品 <b>${fmt(it)}</b> 次（${pct(it)}%）</li><li><i class="c2"></i>🏪 賣場 <b>${fmt(sh)}</b> 次（${pct(sh)}%）</li></ul>` : '<p class="muted sm">這段期間還沒有點擊</p>'}</section>
+    <section class="card ch"><h2 class="ch-h">星期分布 <span class="muted sm">${esc(lab)}</span></h2>
+      <div class="ch-cols" role="img" aria-label="${wn.map((w, k) => `星期${w} ${wk[k]} 次`).join('，')}">${wk.map((v, k) => `<div title="星期${wn[k]}：${fmt(v)} 次"><b>${v ? fmt(v) : ''}</b><span class="ch-col"><span data-h="${v ? Math.max(3, (v / wmx) * 100).toFixed(1) : 0}"></span></span><span class="ch-ax2">${wn[k]}</span></div>`).join('')}</div></section>
+  </div>`;
+}
+async function renderStats(refetch = true) {
+  const body = $('#statsBody');
+  $$('[data-act="statRange"]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.r === statRange)));
+  $('#statCustom').hidden = statRange !== 'custom';
+  let j = statsCache;
+  if (refetch || !j) {
+    body.innerHTML = '<p class="loading">讀取點擊統計中…</p>';
+    try { j = await bridgeApi({ action: 'stats' }); statsCache = j; }
+    catch (e) { body.innerHTML = `<div class="card err">${esc(e.message)}</div>`; return; }
+  }
+  // 以伺服器上的橋接頁為準；對應得到的商品／賣場顯示目前名稱，已刪除的顯示建立時的標題
+  const byCode = new Map(items.filter((i) => i.bridge?.code).map((i) => [i.bridge.code, i]));
+  const codes = Object.keys(j.stats || {});
+  if (!codes.length) { body.innerHTML = '<p class="empty">還沒有橋接頁。到「發布清單」的商品或賣場卡片按「🔗 建立橋接頁」，點擊次數就會顯示在這裡。</p>'; return; }
+  const inR = statInRange(j.today), lab = statLabel();
+  const cnt = (s, f) => Object.entries(s.days || {}).reduce((t, [d, n]) => t + (f(d) ? n : 0), 0);
+  const isToday = (d) => d === j.today, d30 = new Set(dayKeys(j.today, 30)), in30 = (d) => d30.has(d);
+  const d7 = new Set(dayKeys(j.today, 7)), in7 = (d) => d7.has(d);
+  const rows = codes.map((c) => { const s = j.stats[c], i = (s.codes || [c]).map((k) => byCode.get(k)).find(Boolean) || { id: '', name: s.title || c, kind: s.kind === 'shop' ? 'shop' : '', bridge: { code: c }, gone: true }; return { c, i, s, range: cnt(s, inR), today: cnt(s, isToday), week: cnt(s, in7), month: cnt(s, in30), total: s.total || 0 }; })
+    .sort((a, b) => b.range - a.range || b.total - a.total);
+  const sum = (k) => rows.reduce((t, r) => t + r[k], 0);
+  const dup = { today: 'today', 7: 'week', 30: 'month', all: 'total' }[statRange];
+  const pick = (ks, m) => ks.filter((k) => k !== dup).slice(0, m);
+  const NM = { today: '今日', week: '近 7 天', month: '近一個月', total: '累計' };
+  const sumKs = pick(['today', 'total', 'week'], 2), cardKs = pick(['today', 'week', 'month', 'total'], 3);
+  body.innerHTML = `<div class="stat-sum"><div class="hl"><span>${esc(lab)}</span><b>${fmt(sum('range'))}</b></div>${sumKs.map((k) => `<div><span>${NM[k]}</span><b>${fmt(sum(k))}</b></div>`).join('')}<div><span>橋接頁</span><b>${rows.length}</b></div></div>
+    ${statCharts(rows, j, inR, lab)}
+    <h2 class="ch-h">各橋接頁</h2>
+    <div class="cards">${rows.map((r) => { const { c, i, s, range } = r; return `<article class="pc stat">
+      <div class="pc-top"><span>${isShop(i) ? '<span class="tag shoptag">🏪 賣場</span>' : '<span class="tag">🛍️ 商品</span>'}${i.gone ? ' <span class="tag">已從清單刪除</span>' : ''}</span><span class="muted sm">${s.last ? `最後點擊 ${fmtDT(new Date(s.last).toISOString())}` : '尚無點擊'}</span></div>
+      <h3>${esc(i.name)}</h3>
+      <div class="stat-n"><div class="hl"><span>${esc(lab)}</span><b>${fmt(range)}</b></div>${cardKs.map((k) => `<div><span>${NM[k]}</span><b>${fmt(r[k])}</b></div>`).join('')}</div>
+      <div class="pc-row sm"><span class="muted brurl">${esc(bridgeUrl(i).replace(/^https?:\/\//, ''))}</span></div>
+      <div class="acts"><button type="button" data-act="brCopyUrl" data-u="${esc(bridgeUrl(i))}">複製橋接網址</button><button type="button" class="ghost" data-act="statDel" data-c="${esc(c)}" data-n="${esc(i.name)}">刪除</button></div>
+    </article>`; }).join('')}</div>`;
+  $$('#statsBody [data-w]').forEach((e) => { e.style.width = `${e.dataset.w}%`; });
+  $$('#statsBody [data-h]').forEach((e) => { e.style.height = `${e.dataset.h}%`; });
+  $$('#statsBody [data-f]').forEach((e) => { e.style.flex = `${e.dataset.f} 1 0`; });
+}
 
 let catSel = 'all', gradeSel = 'all', shownIds = [];
 function renderList() {
@@ -926,6 +1188,22 @@ const ACT = {
     if (isShop(i)) { if (!confirm(`將賣場「${i.name}」移出發布清單？（會刪除這筆賣場）`)) return; dropShops(new Set([i.id])); save.i(); route(); return; }
     setStatus(i, 'watch'); save.i(); route();
   },
+  // 橋接頁
+  brOpen(b) { const i = items.find((x) => x.id === b.dataset.id); if (i) brDlg(i); },
+  brSave(b) { brSave(b); },
+  brMock(b) { const d = $('#dlg'); d._brMock = b.dataset.m; $$('[data-act="brMock"]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); const i = items.find((x) => x.id === $('[data-act="brSave"]')?.dataset.id); if (i) brMockDraw(i); },
+  brCopyUrl(b) { if (b.dataset.u) copy(b.dataset.u, b); },
+  brCopy(b) { const i = items.find((x) => x.id === b.dataset.id); if (i && brLive(i)) copy(bridgeUrl(i), b); },
+  statsRefresh() { renderStats(); },
+  statRange(b) {
+    statRange = b.dataset.r;
+    if (statRange === 'custom' && !$('#statFrom').value && !$('#statTo').value && statsCache) { $('#statTo').value = statsCache.today; $('#statFrom').value = dayKeys(statsCache.today, 7)[6]; }
+    renderStats(false);
+  },
+  async statDel(b) {
+    if (!confirm(`從點擊統計刪除「${b.dataset.n}」？\n\n只會移除這張統計卡片，已經貼出去的橋接網址仍會繼續導向蝦皮。之後在商品或賣場卡片重新按「建立橋接頁」或「編輯預覽圖」，它會再出現在統計裡。`)) return;
+    try { await bridgeApi({ action: 'hide', code: b.dataset.c }, b); toast('已從點擊統計刪除'); renderStats(); } catch (e) { toast(e.message); }
+  },
   // 新增賣場
   shopNew() { shopDlg(); },
   async shopGen() {
@@ -990,6 +1268,10 @@ document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
   else if (t.id === 'festOn') { S.festOn = t.checked; save.s(); }
+  else if (t.name === 'brTpl') $('#dlg')._brRedraw?.();
+  else if (t.id === 'statFrom' || t.id === 'statTo') renderStats(false);
+  else if (t.id === 'brHeadSel' && t.value !== '') { $('#brHead').value = [...$('#dlg')._brSrc.heads[+t.value]].slice(0, 40).join(''); $('#dlg')._brRedraw?.(); }
+  else if (t.id === 'brSubSel' && t.value !== '') { const p = $('#dlg')._brSrc.posts[+t.value]; $('#brSub').value = brShort(p); $('#brDesc').value = noTags(p).slice(0, 300); $('#dlg')._brRedraw?.(); }
   else if (t.matches('[data-ppick]')) { if (t.checked) pubPicked.add(t.dataset.ppick); else pubPicked.delete(t.dataset.ppick); updPubBtns(); }
   else if (t.matches('[data-pick]')) { if (t.checked) picked.add(t.dataset.pick); else picked.delete(t.dataset.pick); updPickBtn(); }
   else if (t.matches('[data-imp]') && t.files.length) {
@@ -1016,6 +1298,7 @@ document.addEventListener('change', async (e) => {
 });
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.closest?.('#dlg') && /^(brHead|brSub|brTitle|brDesc)$/.test(t.id)) { $('#dlg')._brRedraw?.(); return; }
   if (t.id === 'listQ') renderList();
   else if (t.dataset.sw) { wSum(); $('#saveMsg').textContent = '尚未儲存'; }
 });
@@ -1037,3 +1320,6 @@ route();
 // 打開網站時先自動同步一次，之後改由右上角按鈕手動同步
 idleStatus();
 const firstSync = syncNow();
+
+// 點擊統計：視窗寬度改變時依新寬度重畫圖表
+let statRz; addEventListener('resize', () => { clearTimeout(statRz); statRz = setTimeout(() => { if (statsCache && !$('#v-stats').hidden) renderStats(false); }, 250); });

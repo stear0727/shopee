@@ -1,0 +1,7 @@
+body{margin:0;font-family:"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif;background:#faf7f4;color:#1f1a17}
+.bx{max-width:560px;margin:0 auto;padding:24px 16px;text-align:center}
+.bx img{width:100%;height:auto;border-radius:14px;box-shadow:0 8px 24px rgba(80,30,20,.15)}
+.bx h1{font-size:1.25rem;margin:16px 0 4px}
+.go-msg{color:#6b625b;margin:4px 0 16px}
+.go{display:inline-block;background:#c62938;color:#fff;text-decoration:none;font-weight:700;padding:14px 32px;border-radius:999px;font-size:1.1rem}
+.note{color:#6b625b;font-size:.85rem;margin-top:16px}
