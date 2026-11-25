@@ -616,7 +616,8 @@ const okDest = (u) => { try { const x = new URL(String(u)); return (x.protocol =
 const slugify = (s) => [...String(s || '').normalize('NFC').toLowerCase().replace(/\s+/g, '-').replace(/[^\p{L}\p{N}-]+/gu, '').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '')].slice(0, 30).join('').replace(/-+$/, '');
 const bridgeUrl = (i) => (!i?.bridge?.code ? '' : i.bridge.slug ? `${location.origin}/${i.bridge.slug}` : `${location.origin}/s/${i.bridge.code}`);
 // 複製用：中文編碼成 %XX（Facebook 等平台碰到中文會把網址截斷，只剩首頁、沒有預覽圖）
-const bridgeShareUrl = (i) => (!i?.bridge?.code ? '' : i.bridge.slug ? `${location.origin}/${encodeURIComponent(i.bridge.slug)}` : `${location.origin}/s/${i.bridge.code}`);
+// 後面加版本號（每次更新預覽圖都會變）：Facebook 會快取舊預覽約 30 天，換了網址就會重新抓
+const bridgeShareUrl = (i) => (!i?.bridge?.code ? '' : (i.bridge.slug ? `${location.origin}/${encodeURIComponent(i.bridge.slug)}` : `${location.origin}/s/${i.bridge.code}`) + (i.bridge.at ? `?v=${Number(i.bridge.at).toString(36)}` : ''));
 const brLive = (i) => !!i?.bridge?.code;
 async function bridgeApi(body, btn) {
   const h = { 'Content-Type': 'application/json' }; if (S.accessCode) h['x-access-code'] = S.accessCode;
@@ -1178,7 +1179,7 @@ async function renderStats(refetch = true) {
   const cnt = (s, f) => Object.entries(s.days || {}).reduce((t, [d, n]) => t + (f(d) ? n : 0), 0);
   const isToday = (d) => d === j.today, d30 = new Set(dayKeys(j.today, 30)), in30 = (d) => d30.has(d);
   const d7 = new Set(dayKeys(j.today, 7)), in7 = (d) => d7.has(d);
-  const rows = codes.map((c) => { const s = j.stats[c], i = (s.codes || [c]).map((k) => byCode.get(k)).find(Boolean) || { id: '', name: s.title || c, kind: s.kind === 'shop' ? 'shop' : '', bridge: { code: c }, gone: true }; if (i.gone && s.slug) i.bridge.slug = s.slug; return { c, i, s, range: cnt(s, inR), today: cnt(s, isToday), week: cnt(s, in7), month: cnt(s, in30), total: s.total || 0 }; })
+  const rows = codes.map((c) => { const s = j.stats[c], i = (s.codes || [c]).map((k) => byCode.get(k)).find(Boolean) || { id: '', name: s.title || c, kind: s.kind === 'shop' ? 'shop' : '', bridge: { code: c }, gone: true }; if (i.gone) { if (s.slug) i.bridge.slug = s.slug; i.bridge.at = s.at; } return { c, i, s, range: cnt(s, inR), today: cnt(s, isToday), week: cnt(s, in7), month: cnt(s, in30), total: s.total || 0 }; })
     .sort((a, b) => b.range - a.range || b.total - a.total);
   const sum = (k) => rows.reduce((t, r) => t + r[k], 0);
   const dup = { today: 'today', 7: 'week', 30: 'month', all: 'total' }[statRange];

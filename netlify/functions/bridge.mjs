@@ -42,8 +42,9 @@ async function countClick(st, code) {
   await st.setJSON(key, cur);
 }
 
-function page(rec, origin) {
-  const url = rec.slug ? `${origin}/${encodeURIComponent(rec.slug)}` : `${origin}/s/${rec.code}`, img = `${origin}/s/${rec.code}/og.jpg?v=${rec.at}`;
+function page(rec, origin, ver) {
+  // ver：分享網址上的版本號（每次更新預覽圖都不同，讓 Facebook 當成新網址重新抓預覽）
+  const url = (rec.slug ? `${origin}/${encodeURIComponent(rec.slug)}` : `${origin}/s/${rec.code}`) + (ver ? `?v=${ver}` : ''), img = `${origin}/s/${rec.code}/og.jpg?v=${rec.at}`;
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(rec.title)}</title>
@@ -103,7 +104,7 @@ async function handle(req, context) {
       return new Response(null, { status: 302, headers: { Location: rec.dest, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
     }
     // 平台預覽抓取（機器人）：給預覽圖與標題的頁面（頁面裡仍有轉址備援）
-    return new Response(page(rec, u.origin), { headers: PAGE_HEADERS });
+    return new Response(page(rec, u.origin, /^[a-z0-9]{1,12}$/.test(u.searchParams.get('v') || '') ? u.searchParams.get('v') : ''), { headers: PAGE_HEADERS });
   }
 
   // ---------- 管理：/api/bridge ----------
