@@ -42,7 +42,14 @@ async function countClick(st, code) {
   await st.setJSON(key, cur);
 }
 
-function page(rec, origin, ver) {
+// Android 上的 Threads／Instagram 內建瀏覽器不會把蝦皮連結交給 APP：改用 intent 連結指定蝦皮 APP 開啟（沒裝 APP 就開網頁）
+const SHOPEE_PKG = 'com.shopee.tw';
+const IN_APP_ANDROID = (ua) => /Android/i.test(ua) && /Barcelona|Instagram/i.test(ua);
+function intentUrl(dest) {
+  try { const d = new URL(dest); return `intent://${d.host}${d.pathname}${d.search}#Intent;scheme=${d.protocol.slice(0, -1)};package=${SHOPEE_PKG};S.browser_fallback_url=${encodeURIComponent(dest)};end`; }
+  catch { return ''; }
+}
+function page(rec, origin, ver, intent = '') {
   // ver：分享網址上的版本號（每次更新預覽圖都不同，讓 Facebook 當成新網址重新抓預覽）
   const url = (rec.slug ? `${origin}/${encodeURIComponent(rec.slug)}` : `${origin}/s/${rec.code}`) + (ver ? `?v=${ver}` : ''), img = `${origin}/s/${rec.code}/og.jpg?v=${rec.at}`;
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8">
@@ -70,7 +77,7 @@ function page(rec, origin, ver) {
 <img src="/s/${esc(rec.code)}/og.jpg?v=${rec.at}" alt="" width="1200" height="630">
 <h1>${esc(rec.title)}</h1>
 <p class="go-msg">正在前往蝦皮…</p>
-<a id="go" class="go" href="${esc(rec.dest)}" rel="nofollow sponsored noopener">前往${rec.kind === 'shop' ? '賣場' : '商品頁'}</a>
+<a id="go" class="go" href="${esc(rec.dest)}"${intent ? ` data-intent="${esc(intent)}"` : ''} rel="nofollow sponsored noopener">前往${rec.kind === 'shop' ? '賣場' : '商品頁'}</a>
 </main>
 </body></html>`;
 }
@@ -100,7 +107,10 @@ async function handle(req, context) {
     if (req.method === 'GET' && !BOT_RE.test(req.headers.get('user-agent') || '')) {
       const p = countClick(st, code).catch(() => {});
       if (context?.waitUntil) context.waitUntil(p); else await p;
-      // 真人：伺服器直接轉址到分潤連結，不先顯示本站頁面
+      // Android 的 Threads／Instagram：回傳頁面，由 bridge.js 以 intent 開啟蝦皮 APP
+      const it = IN_APP_ANDROID(req.headers.get('user-agent') || '') ? intentUrl(rec.dest) : '';
+      if (it) return new Response(page(rec, u.origin, '', it), { headers: { ...PAGE_HEADERS, 'Cache-Control': 'no-store' } });
+      // 其他真人：伺服器直接轉址到分潤連結，不先顯示本站頁面
       return new Response(null, { status: 302, headers: { Location: rec.dest, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' } });
     }
     // 平台預覽抓取（機器人）：給預覽圖與標題的頁面（頁面裡仍有轉址備援）
