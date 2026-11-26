@@ -15,7 +15,12 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('sp_' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('sp_' + k, JSON.stringify(v)); } catch { toast('無法寫入本機儲存空間'); } },
 };
-function toast(m) { const t = $('#toast'), d = document.getElementById('dlg'); (d && d.open ? d : document.body).append(t); t.textContent = m; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2800); }
+function toast(m) {
+  // 提示框可能被移進對話框後隨對話框內容一起被清掉：找不到就重建
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.setAttribute('role', 'status'); t.setAttribute('aria-live', 'polite'); }
+  m = m == null ? '' : String(m);
+  const d = document.getElementById('dlg'); (d && d.open ? d : document.body).append(t); t.textContent = m; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2800); }
 const stat = (label, val, sub = '', cls = '') => `<div class="stat ${cls}"><span>${esc(label)}</span><b>${val}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
 
 /* ========== 常數 ========== */
