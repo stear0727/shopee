@@ -440,3 +440,12 @@ input[aria-invalid="true"]{border-color:#c0392b;outline-color:#c0392b}
 .hm-leg{display:flex;align-items:center;gap:4px;justify-content:flex-end;margin-top:6px}
 .hm-leg i{display:inline-block;width:16px;height:12px;border-radius:3px;background:var(--c1)}
 .ch-cols>div>b,.ch-cols .ch-ax2{display:block;min-height:1.25em;line-height:1.25em}
+/* 趨勢話題 */
+.trend-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 8px}
+.trend-bar select{width:auto;margin:0}
+.trend-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.trend-chip{min-height:36px;padding:0 12px;border-radius:999px;font-size:.85rem}
+.trend-chip.on{border-color:var(--acc);background:var(--accbg);font-weight:700}
+.trend-chip.sens{opacity:.75;border-style:dashed}
+.trend-sens summary{cursor:pointer;min-height:32px;display:flex;align-items:center}
+.trend-heat{margin-left:6px;font-size:.75rem;font-weight:700;color:var(--acc);font-variant-numeric:tabular-nums}

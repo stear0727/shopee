@@ -111,7 +111,30 @@ const DEF_W = Object.fromEntries(DIMS.map((d) => [d.k, d.w]));
 const _s = store.get('settings', {});
 const S = { accessCode: '', ownKey: '', ..._s, wv: 3, weights: _s.wv === 3 && _s.weights ? { ...DEF_W, ..._s.weights } : { ...DEF_W }, alias: { ..._s.alias } };
 const blankDraft = () => ({ id: '', name: '', category: '', price: '', base: '', xtra: '', platform: 'fb', format: FORMATS[0], scores: Object.fromEntries(USER_DIMS.map((d) => [d.k, 3])) });
+// AI 偶爾在 JSON 字串裡直接換行（不合格式），解析失敗就把字串內的換行、Tab 轉義後再試；也容許結尾多一個逗號
+function looseJSON(text) {
+  const raw = String(text || '').replace(/```(?:json)?/g, '');
+  const a = raw.indexOf('{'), b = raw.lastIndexOf('}'); if (a < 0 || b <= a) return null;
+  const src = raw.slice(a, b + 1);
+  try { return JSON.parse(src); } catch {}
+  let out = '', inStr = false, esc = false;
+  for (const ch of src) {
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === '\\') { out += ch; esc = true; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') continue;
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  try { return JSON.parse(out.replace(/,\s*([}\]])/g, '$1')); } catch { return null; }
+}
 let items = store.get('items', []);
+const aiJ = (i) => i?.aiData?.json || (i?.aiData?.text ? looseJSON(i.aiData.text) : null);
+// 舊資料：當時 AI 回傳格式不合而沒解析成功的文案，重新解析一次
+for (const i of items) if (i.aiData && !i.aiData.json && i.aiData.text) { const o = looseJSON(i.aiData.text); if (o) i.aiData.json = o; }
 const save = {
   s: () => { S.setAt = Date.now(); store.set('settings', S); if (typeof markDirty === 'function') markDirty(); },
   i: () => { const changed = typeof stampItems === 'function' ? stampItems() : true; store.set('items', items); if (changed && typeof markDirty === 'function') markDirty(); },
@@ -396,7 +419,7 @@ function lineify(s, threads = true) {
   return tags.length ? `${body}\n\n${tags.join(' ')}` : body;
 }
 function renderAnalyze(j, p) {
-  const o = j.json, sub = subId(p);
+  const o = j.json || looseJSON(j.text), sub = subId(p);
   const L = (a) => { const v = (Array.isArray(a) ? a : []).map(aiTxt).filter(Boolean); return v.length ? `<ul>${v.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="muted">（無）</p>'; };
   let h, t;
   const aff = safeUrl(p.aff) ? p.aff : '';
@@ -419,7 +442,11 @@ function renderAnalyze(j, p) {
     const replies = Array.isArray(o.replies) ? o.replies : [];
     const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' && o.festivalPost.post.trim() ? { ...o.festivalPost, post: lineify(o.festivalPost.post) } : null;
     if (fp) outText.postFest = fp.post;
+    const tp0 = trendPostOf(o), tp = tp0 ? { ...tp0, post: lineify(tp0.post) } : null;
+    if (tp) outText.postTrend = tp.post;
+    const tnote = !tp && typeof o.trendNote === 'string' && o.trendNote.trim() ? o.trendNote.trim() : '';
     h = `<p class="verdict">${esc(aiTxt(o.verdict))}</p>
+    ${tp ? `<h3>🔥 趨勢話題文案（${esc(aiTxt(tp.topic) || '趨勢話題')}）</h3><div class="post fest"><p>${esc(tp.post)}</p><button type="button" data-act="copy" data-k="postTrend">複製</button></div>` : tnote ? `<p class="hint">🔥 趨勢話題未結合：${esc(tnote)}</p>` : ''}
     ${fp ? `<h3>🎉 節慶活動文案（${esc(fp.festival || '近期節慶')}）</h3><div class="post fest"><p>${esc(fp.post)}</p><button type="button" data-act="copy" data-k="postFest">複製</button></div>` : ''}
     ${posts.length ? `<h3>短貼文（Threads／IG／FB，可直接複製）</h3>${posts.map((x, n) => `<div class="post"><p>${esc(x)}</p><button type="button" data-act="copy" data-k="post${n}">複製</button></div>`).join('')}` : ''}
     ${long ? `<h3>心得長文（FB 社團／Dcard）</h3><div class="post"><p>${esc(long)}</p><button type="button" data-act="copy" data-k="postLong">複製</button></div>` : ''}
@@ -434,18 +461,21 @@ function renderAnalyze(j, p) {
     ${replies.length ? `<h3>預想留言與回覆</h3>${L(replies)}` : ''}
     <h3>A/B 測試建議</h3>${L(o.tests)}<h3>合規提醒</h3>${L(o.compliance)}`;
     const ls = (a) => (Array.isArray(a) ? a.map(aiTxt).filter(Boolean).map((x) => `- ${x}`).join('\n') : '');
-    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}${aff ? `分潤連結\n${aff}\n\n` : ''}${brU ? `橋接網址\n${bridgeShareUrl(p)}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
+    t = `【${p.name}】${aiTxt(o.verdict)}\n\n${tp ? `趨勢話題文案（${aiTxt(tp.topic) || ''}）\n${tp.post}\n\n` : ''}${fp ? `節慶活動文案（${fp.festival || ''}）\n${fp.post}\n\n` : ''}${posts.length ? `短貼文\n${posts.map((x, n) => `${n + 1}. ${x}`).join('\n\n')}\n\n` : ''}${long ? `心得長文\n${long}\n\n` : ''}${tags ? `Hashtag\n${tags}\n\n` : ''}${aff ? `分潤連結\n${aff}\n\n` : ''}${brU ? `橋接網址\n${bridgeShareUrl(p)}\n\n` : ''}吸睛第一句\n${ls(o.headlines || o.hooks)}\n\n${car.length ? `IG 輪播\n${car.map((s, n) => `${s?.slide || `第 ${n + 1} 張`}｜${s?.title || ''}｜${s?.text || ''}`).join('\n')}\n\n` : ''}實拍照片建議\n${ls(o.imageIdeas)}\n\nCTA：${aiTxt(o.cta)}\n${aiTxt(o.bestTime) ? `發文時段：${aiTxt(o.bestTime)}\n` : ''}\n合規提醒\n${ls(o.compliance)}\n\nSub_id：${sub}`;
   } else { h = `<div class="md">${md(j.text)}</div>${affH}`; t = j.text + (aff ? `\n\n分潤連結：${aff}` : '') + `\n\nSub_id：${sub}`; }
   h += `<h3>建議 Sub_id</h3><p><code>${esc(sub)}</code> <span class="hint">（平台_日期_商品代碼，貼到自定義連結的 Sub_id 欄）</span></p>`;
   return outCard('analyze', h, j, t);
 }
 // 把 AI 文案結果存到商品上（單件與批次共用），回傳顯示用的 HTML
-const copyReq = (i, want, fest) => isShop(i) ? { kind: 'shop', name: i.name, platform: 'fb', wantFest: want && !!fest, festival: fest } : i.manual ? { name: i.name, category: i.category === '未分類' ? '' : i.category, price: num(i.price) || undefined, platform: i.platform, wantFest: want && !!fest, festival: fest } : ({ name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest });
+// 話題若是 AI 依這件商品挑的，把切入角度一起交給寫文案的 AI，避免兩次判斷不一致
+const trendAngle = (trend) => { const d = $('#dlg'); return trend && d?._trendAuto === trend && d._trendWhyFor === trend ? d._trendWhy || '' : ''; };
+const copyReq = (i, want, fest, trend = trendVal()) => ({ ...copyReq0(i, want, fest), wantTrend: !!trend, trend, trendAngle: trendAngle(trend) });
+const copyReq0 = (i, want, fest) => isShop(i) ? { kind: 'shop', name: i.name, platform: 'fb', wantFest: want && !!fest, festival: fest } : i.manual ? { name: i.name, category: i.category === '未分類' ? '' : i.category, price: num(i.price) || undefined, platform: i.platform, wantFest: want && !!fest, festival: fest } : ({ name: i.name, category: i.category, price: num(i.price), platform: i.platform, format: i.format, scores: scoreOf(i).v, total: i.total, grade: i.grade, wantFest: want && !!fest, festival: fest });
 function applyCopy(i, j, want, fest) {
   const html = renderAnalyze(j, i);
   i.aiText = String(outText.analyze || '').slice(0, 8000);
-  i.aiData = { json: j.json, text: String(j.text || '').slice(0, 12000), model: j.model };
-  i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : '';
+  i.aiData = { json: j.json || looseJSON(j.text), text: String(j.text || '').slice(0, 12000), model: j.model };
+  i.aiAt = new Date().toISOString(); i.aiFest = want ? fest.slice(0, 200) : ''; i.aiTrend = trendVal();
   if (i.status === 'todo') setStatus(i, 'copy');
   return html;
 }
@@ -484,7 +514,58 @@ function updPubBtns() {
   for (const [id, l, c] of [['pubGenBtn', '批次產生文案', batchRunning ? 0 : nd], ['pubDoneBtn', '標記已發布', nd], ['pubUndoBtn', '取消已發布', dn], ['pubOutBtn', '移出清單', sel.length]]) { const b = document.getElementById(id); if (b) { b.textContent = l + '（' + c + '）'; b.disabled = !c; } }
 }
 // 產生文案視窗裡的「節慶活動」區塊：預設帶入近三週節慶，可修改或取消
-const festForm = () => `<div class="fest-box">
+// AI 的趨勢話題文案：通常是 { topic, post }，偶爾直接回一段文字，兩種都接受
+function trendPostOf(o) {
+  const t = o?.trendPost;
+  if (typeof t === 'string' && t.trim()) return { topic: '', post: t.trim() };
+  if (t && typeof t === 'object' && typeof t.post === 'string' && t.post.trim()) return { topic: typeof t.topic === 'string' ? t.topic : '', post: t.post.trim() };
+  return null;
+}
+// 趨勢話題：可載入 Threads 熱門話題點選，也可自行輸入
+const trendForm = () => `<div class="fest-box trend-box">
+  <div class="checks"><label><input type="checkbox" id="trendOn"${S.trendOn ? ' checked' : ''}>加一段結合趨勢話題的文案</label></div>
+  <label>趨勢話題（點下方熱門話題帶入，或自行輸入）<input id="trendText" maxlength="60" autocomplete="off" placeholder="例如：三麗鷗變裝悠遊卡掀搶購"></label>
+  <div class="trend-bar"><select id="trendWin" aria-label="熱門話題時間範圍"><option value="24h">過去 24 小時</option><option value="7d">過去一週</option><option value="30d">過去一個月</option></select><button type="button" data-act="trendLoad">🔥 載入 Threads 熱門話題</button></div>
+  <div id="trendList" class="trend-list"></div>
+  <p class="hint">資料來源：<a href="https://tools.ccea.tw/threadscount/" target="_blank" rel="noopener noreferrer">福音協進會 Threads 熱門話題統計</a>（每 30 分鐘更新，未經查證）。只會把話題名稱交給 AI；政治、災難、傷亡、犯罪、八卦等話題 AI 不會結合，商品搭不上時也不會硬寫。</p>
+</div>`;
+// 視窗打開時自動載入熱門話題，再由 AI 挑一個搭得上這個商品的話題帶入（伺服器有 30 分鐘快取）
+function trendInit(ctx) { const d = $('#dlg'); d._trendFor = ctx || null; d._trendAuto = ''; d._trendTopics = null; const b = $('[data-act="trendLoad"]'); if (b && $('#trendList')) ACT.trendLoad(b, true); }
+// 目前要挑話題的商品：卡片視窗帶入的商品，或「＋新增」視窗正在輸入的名稱
+function trendCtx() {
+  const d = $('#dlg'); if (d._trendFor) return d._trendFor;
+  const name = ($('#shopName')?.value || '').trim(); if (!name) return null;
+  return { name, category: ($('#addCat')?.value || '').trim(), kind: d._addKind === 'shop' ? 'shop' : 'item' };
+}
+async function trendSuggest() {
+  const d = $('#dlg'), inp = $('#trendText'), note = $('#trendAutoNote'), topics = d._trendTopics;
+  if (!inp || !note || !topics) return;
+  if (inp.value.trim() && inp.value !== d._trendAuto) return;   // 使用者自己輸入或點選過就不覆蓋
+  const ctx = trendCtx(); note.hidden = false;
+  if (!ctx) { note.textContent = '輸入名稱後，會自動挑一個搭得上的話題。'; return; }
+  if (ctx.batch) { note.textContent = '批次產生的商品各不相同，不會自動帶入；選了話題後，AI 會逐件判斷是否搭得上，搭不上的那件就不結合。'; return; }
+  if (!topics.length) { note.textContent = '目前沒有適合行銷的熱門話題，可自行輸入。'; return; }
+  const key = `${ctx.kind}|${ctx.name}|${ctx.category}`; if (d._trendKey === key) return; d._trendKey = key;
+  note.textContent = `AI 正在挑選跟「${ctx.name}」搭得上的話題…`;
+  try {
+    const j = await ai('trend_pick', { ...ctx, topics: topics.slice(0, 30) });
+    if (d._trendKey !== key || !$('#trendText')) return;
+    const t = typeof j.json?.topic === 'string' ? j.json.topic.trim() : '', why = typeof j.json?.reason === 'string' ? j.json.reason.trim() : '';
+    if (inp.value.trim() && inp.value !== d._trendAuto) return;
+    if (t && topics.includes(t)) {
+      inp.value = t; d._trendAuto = t; d._trendWhy = why; d._trendWhyFor = t;
+      $$('.trend-chip').forEach((x) => x.classList.toggle('on', x.dataset.t === t));
+      note.textContent = `已自動帶入搭得上的話題「${t}」${why ? `：${why}` : ''}。可點其他話題改選，或清空欄位。`;
+    } else {
+      if (inp.value === d._trendAuto) inp.value = ''; d._trendAuto = '';
+      $$('.trend-chip').forEach((x) => x.classList.remove('on'));
+      note.textContent = `目前的熱門話題沒有跟「${ctx.name}」搭得上的${why ? `（${why}）` : ''}，可自行輸入或點選。`;
+    }
+  } catch (e) { d._trendKey = ''; note.textContent = `自動挑選話題失敗：${e.message}，可直接點選或自行輸入。`; }
+}
+// 讀取趨勢話題設定（各產生文案入口共用）
+const trendVal = () => { const on = !!$('#trendOn')?.checked, t = ($('#trendText')?.value || '').trim(); return on && t ? t.slice(0, 60) : ''; };
+const festForm = () => trendForm() + `<div class="fest-box">
   <div class="checks"><label><input type="checkbox" id="festOn"${S.festOn !== false ? ' checked' : ''}>加一段節慶活動文案</label></div>
   <label>節慶／活動資訊（選填，提供給 AI 參考）<textarea id="festText" rows="2" maxlength="500" placeholder="${festAuto() ? '' : '近三週沒有偵測到節慶，可自行輸入活動資訊（例如：店慶 12/1–12/7 全館 9 折）'}">${esc(festAuto())}</textarea></label>
   <p class="hint">已依現在時間（${fmtDT(new Date().toISOString()).slice(0, 10)}）自動帶入未來三週的節慶與電商檔期，可直接修改（例如補上優惠內容與時間）；AI 只會使用這裡提供的活動細節，商品不適合時不會硬寫。<button type="button" class="link" data-act="festFill">重新帶入近期節慶</button></p>
@@ -539,7 +620,7 @@ function schedDlg(i) {
 }
 // AI 文案裡的建議發文時段（舊資料沒有 aiData 時，從文字版「發文時段：」那行取出）
 function bestTimeOf(i) {
-  const b = aiTxt(i.aiData && i.aiData.json && i.aiData.json.bestTime);
+  const b = aiTxt(aiJ(i)?.bestTime);
   if (b) return b;
   const m = /發文時段：(.+)/.exec(i.aiText || '');
   return m ? aiTxt(m[1]) : '';
@@ -605,7 +686,7 @@ function shopDlg(kind) {
       <div class="btns"><button type="submit" class="pri" id="shopGenBtn">開始產生文案</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
     </form>
     <div id="dlgOut"></div>`;
-  if (!d.open) d.showModal();
+  if (!d.open) d.showModal(); trendInit();
   setTimeout(() => $('#shopName')?.focus(), 30);
 }
 // 刪除賣場（同步時會自動記入刪除紀錄，另一台裝置同步後也會刪除）
@@ -646,15 +727,17 @@ function bridgeHtml(i) {
 // 從 AI 文案取出可用的大字（吸睛第一句）與短貼文
 const noTags = (s) => String(s || '').replace(/#[^\s#]+/g, '').replace(/\s+/g, ' ').trim();
 function brSrc(i) {
-  const o = i.aiData?.json || {}, arr = (a) => (Array.isArray(a) ? a : []).map(aiTxt).map((x) => x.trim()).filter(Boolean);
+  const o = aiJ(i) || {}, arr = (a) => (Array.isArray(a) ? a : []).map(aiTxt).map((x) => x.trim()).filter(Boolean);
   // 可選的文案：吸睛第一句、節慶活動文案、短貼文（大字取各貼文的第一行）
   const fp = o.festivalPost && typeof o.festivalPost === 'object' && typeof o.festivalPost.post === 'string' ? o.festivalPost.post.trim() : '';
   const fg = `🎉 節慶活動文案${o.festivalPost?.festival ? `・${aiTxt(o.festivalPost.festival)}` : ''}`;
   const first = (t) => (lineify(t).split('\n').map((x) => noTags(x).trim()).find(Boolean) || '').replace(/[。，,、]+$/, '');
   const posts = arr(o.posts);
-  const H = [...arr(o.headlines || o.hooks).map((t) => ['💡 吸睛第一句', noTags(t)]), ...(fp ? [[fg, first(fp)]] : []), ...posts.map((t) => ['📝 短貼文', first(t)])];
+  const tpo = trendPostOf(o), tp = tpo ? tpo.post : '';
+  const tg = `🔥 趨勢話題文案${tpo?.topic ? `・${aiTxt(tpo.topic)}` : ''}`;
+  const H = [...arr(o.headlines || o.hooks).map((t) => ['💡 吸睛第一句', noTags(t)]), ...(tp ? [[tg, first(tp)]] : []), ...(fp ? [[fg, first(fp)]] : []), ...posts.map((t) => ['📝 短貼文', first(t)])];
   const seen = new Set(), Hd = H.filter(([, t]) => t && !seen.has(t) && seen.add(t));
-  const Pp = [...(fp ? [[fg, fp]] : []), ...posts.map((t) => ['📝 短貼文', t])];
+  const Pp = [...(tp ? [[tg, tp]] : []), ...(fp ? [[fg, fp]] : []), ...posts.map((t) => ['📝 短貼文', t])];
   return { heads: Hd.map((x) => x[1]), hg: Hd.map((x) => x[0]), posts: Pp.map((x) => x[1]), pg: Pp.map((x) => x[0]) };
 }
 // 下拉選單依來源分組
@@ -968,8 +1051,8 @@ function brDlg(i) {
     <label class="chk"><input type="checkbox" id="brShowName"${b.showName ? ' checked' : ''}> 在預覽圖上顯示${i.kind === 'shop' ? '賣場' : '商品'}名稱</label>
     <label>預覽卡片標題<input id="brTitle" maxlength="80" value="${esc(b.title ?? i.name)}"></label>
     <p class="muted sm" id="brSlugHint">橋接網址：${esc(location.host)}/${esc(slugify(head) || '（填入圖上大字後產生）')}</p>
-    <label>圖上大字（約 16 字）${src.heads.length ? `<select id="brHeadSel"><option value="">從 AI 文案帶入（吸睛句／節慶／短貼文）…</option>${brOpts(src.heads, src.hg, (t) => t)}</select>` : ''}<input id="brHead" maxlength="40" value="${esc(head)}" placeholder="例如：保養品補貨就趁現在"></label>
-    <label>圖上小字（約 40 字）${src.posts.length ? `<select id="brSubSel"><option value="">從 AI 文案帶入（節慶活動文案／短貼文）…</option>${brOpts(src.posts, src.pg, (t) => noTags(t).replace(/\s+/g, ' '))}</select>` : ''}<textarea id="brSub" rows="3" maxlength="120">${esc(sub)}</textarea></label>
+    <label>圖上大字（約 16 字）${src.heads.length ? `<select id="brHeadSel"><option value="">從 AI 文案帶入（吸睛句／趨勢／節慶／短貼文）…</option>${brOpts(src.heads, src.hg, (t) => t)}</select>` : ''}<input id="brHead" maxlength="40" value="${esc(head)}" placeholder="例如：保養品補貨就趁現在"></label>
+    <label>圖上小字（約 40 字）${src.posts.length ? `<select id="brSubSel"><option value="">從 AI 文案帶入（趨勢／節慶／短貼文）…</option>${brOpts(src.posts, src.pg, (t) => noTags(t).replace(/\s+/g, ' '))}</select>` : ''}<textarea id="brSub" rows="3" maxlength="120">${esc(sub)}</textarea></label>
     <label>卡片說明文字（顯示在預覽圖下方）<textarea id="brDesc" rows="3" maxlength="300">${esc(desc)}</textarea></label>
     ${src.heads.length || src.posts.length ? '' : '<p class="hint">這件還沒有 AI 文案，可以先手動填寫，或先按「產生文案」再回來帶入。</p>'}
     <p class="hint">真人點進橋接網址會立刻轉到${i.kind === 'shop' ? '賣場' : '商品頁'}。預覽圖與標題請如實反映要去的${i.kind === 'shop' ? '賣場' : '商品'}。</p>
@@ -1417,7 +1500,7 @@ const ACT = {
       ${festForm()}
       <div class="btns"><button type="button" class="pri" data-act="genCopy" data-id="${esc(i.id)}">開始產生文案</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
       <div id="dlgOut"></div>`;
-    if (!d.open) d.showModal();
+    if (!d.open) d.showModal(); trendInit({ name: i.name, category: isShop(i) ? '' : (i.category || ''), kind: isShop(i) ? 'shop' : 'item' });
   },
   // 第二步：依節慶設定呼叫 AI，結果顯示在同一個視窗
   async genCopy(b) {
@@ -1451,7 +1534,7 @@ const ACT = {
       ${festForm()}
       <div class="btns"><button type="button" class="pri" data-act="batchGo">開始產生</button><button type="button" class="ghost" data-act="closeDlg">取消</button></div>
       <div id="batchOut"></div>`;
-    if (!d.open) d.showModal();
+    if (!d.open) d.showModal(); trendInit({ batch: true });
   },
   async batchGo(b) {
     if (batchRunning) return;
@@ -1499,7 +1582,7 @@ const ACT = {
   navToggle() { setNavMini(!document.body.classList.contains('nav-mini')); },
   showFest(b) {
     const i = items.find((x) => x.id === b.dataset.id); if (!i) return;
-    const fp = i.aiData?.json?.festivalPost, post = fp && typeof fp.post === 'string' ? fp.post.trim() : '';
+    const fp = aiJ(i)?.festivalPost, post = fp && typeof fp.post === 'string' ? fp.post.trim() : '';
     if (post) outText.festView = post;
     const d = $('#dlg');
     d.innerHTML = `<div class="dlg-head"><h2>${esc(i.name)}｜節慶資訊</h2><button type="button" data-act="closeDlg" aria-label="關閉">✕</button></div>
@@ -1527,6 +1610,31 @@ const ACT = {
   },
   pickAll() { shownIds.forEach((id) => picked.add(id)); renderList(); toast(`已選取 ${shownIds.length} 件`); },
   pickNone() { picked.clear(); renderList(); },
+  async trendLoad(b, auto = false) {
+    const box = $('#trendList'); if (!box || !b) return;
+    const w = $('#trendWin')?.value || '24h', label = b.textContent; b.disabled = true; b.textContent = '載入中…';
+    try {
+      const h = {}; if (S.accessCode) h['x-access-code'] = S.accessCode;
+      const r = await fetch(`/api/trends?w=${encodeURIComponent(w)}`, { headers: h }); let j; try { j = await r.json(); } catch { j = { ok: false, error: `HTTP ${r.status}` }; }
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const ok = j.topics.filter((t) => !t.sensitive), bad = j.topics.filter((t) => t.sensitive);
+      const chip = (t) => `<button type="button" class="trend-chip${t.sensitive ? ' sens' : ''}" data-act="trendPick" data-t="${esc(t.title)}" title="加權熱度 ${fmt(t.heat, 1)}・上榜 ${t.appears} 次${t.peak ? `・貼文峰值 ${fmt(t.peak)}` : ''}">${t.isNew ? '🆕 ' : ''}${esc(t.title)}<span class="trend-heat" aria-label="加權熱度">🔥${fmt(t.heat, 1)}</span></button>`;
+      box.innerHTML = `<p class="muted sm">依加權熱度排序（🔥 後的數字）・更新於 ${esc(fmtDT(j.generatedAt) || '')}${j.stale ? '（暫時讀不到最新資料，顯示上次結果）' : ''}・點一下帶入</p>
+        <div class="trend-chips">${ok.slice(0, 24).map(chip).join('') || '<span class="muted sm">目前沒有適合的話題</span>'}</div>
+        <p class="muted sm" id="trendAutoNote" hidden></p>
+        ${bad.length ? `<details class="trend-sens"><summary class="muted sm">可能不適合行銷的話題（政治、災難、社會案件、八卦等）${bad.length} 個</summary><div class="trend-chips">${bad.slice(0, 20).map(chip).join('')}</div></details>` : ''}`;
+      // 開啟視窗時：請 AI 從適合的話題中挑一個搭得上這個商品的帶入
+      $('#dlg')._trendTopics = ok.map((t) => t.title);
+      if (auto) trendSuggest();
+    } catch (e) { box.innerHTML = auto ? '' : `<p class="ferr">${esc(e.message || '載入失敗')}</p>`; }
+    b.disabled = false; b.textContent = label;
+  },
+  trendPick(b) {
+    const t = b.dataset.t || '', inp = $('#trendText'); if (!inp) return;
+    if (b.classList.contains('sens') && !confirm(`「${t}」可能涉及政治、災難、社會案件或八卦，拿來行銷容易引起反感或爭議，AI 多半會拒絕結合。仍要帶入嗎？`)) return;
+    inp.value = t; $('#dlg')._trendAuto = ''; const on = $('#trendOn'); if (on) on.checked = true; S.trendOn = true; save.s();
+    $$('.trend-chip').forEach((x) => x.classList.toggle('on', x === b));
+  },
   festFill() { $('#festText').value = festAuto(); toast(festAuto() ? '已帶入近三週節慶' : '近三週沒有節慶'); },
   pubAll() { pubShown.forEach((id) => pubPicked.add(id)); renderPub(); },
   pubSel(b) { pubSel = b.dataset.f; renderPub(); },
@@ -1667,6 +1775,7 @@ document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.matches('select[data-act="status"]')) { const i = items.find((x) => x.id === t.dataset.id); if (i) { setStatus(i, t.value); save.i(); route(); } }
   else if (t.id === 'festOn') { S.festOn = t.checked; save.s(); }
+  else if (t.id === 'trendOn') { S.trendOn = t.checked; save.s(); }
   else if (t.name === 'brSty' || t.name === 'brFit' || t.id === 'brPhotoOnly' || t.id === 'brShowName') $('#dlg')._brRedraw?.();
   else if (t.id === 'brCut') { brProcess(); $('#dlg')._brRedraw?.(); }
   else if (t.id === 'brPhoto') brLoadPhoto(t.files?.[0]);
@@ -1697,8 +1806,9 @@ document.addEventListener('change', async (e) => {
     if (location.hash !== '#list') location.hash = '#list'; else route();
   } else if (t.id === 'listSort') renderList();
 });
-let brAdjT;
+let brAdjT, trendT;
 document.addEventListener('input', (e) => {
+  if ((e.target.id === 'shopName' || e.target.id === 'addCat') && $('#dlg')._trendTopics) { clearTimeout(trendT); trendT = setTimeout(trendSuggest, 900); }
   const t = e.target;
   if (t.id === 'brHead') { const h = $('#brSlugHint'), v = slugify(t.value); if (h) h.textContent = `橋接網址：${location.host}/${v || '（填入圖上大字後產生）'}`; }
   if (/^br(Z|Px|Py)$/.test(t.id)) { $('#dlg')._brRedraw?.(); return; }

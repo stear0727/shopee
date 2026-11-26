@@ -1,7 +1,7 @@
 // /api/ai — 唯一的後端端點：任務白名單、伺服器端組裝提示詞、呼叫 Gemini。
 // 金鑰只來自環境變數 GEMINI_API_KEY，或使用者以 x-gemini-key 標頭自備（不記錄、不寫日誌）。
 
-const TASKS = new Set(['analyze', 'video_plan']);
+const TASKS = new Set(['analyze', 'video_plan', 'trend_pick']);
 // 影片風格代碼與說明（要和 public/video.js 的 STYLES 一致）
 const STYLE_DESC = { weather: '氣象播報', meme: '迷因爆笑', trailer: '電影預告', neon: '深夜霓虹', fighter: '格鬥遊戲對決', kraft: '牛皮紙手繪', thermal: '熱感應鏡頭', dating: '交友配對',
   news: '新聞快報', cooking: '料理節目', sports: '體育轉播', scifi: '科幻全息', retro: '復古錄影帶', pixel: '像素遊戲', comic: '美式漫畫', magazine: '時尚雜誌',
@@ -61,6 +61,15 @@ function build(task, p, hasImage) {
 使用者提供的近期節慶／活動資訊：${fest}（今天：${new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)}）。
 若此商品適合搭配其中某個節慶或活動（例如送禮、應景、檔期優惠），請在 festivalPost 寫一則 60–120 字的節慶活動貼文（點出節慶與時效、Threads 版型、CTA、最多 1 個相關 hashtag）；活動細節只能使用上述資訊，不要自行編造優惠；若都不適合，festivalPost 設為 null，不要硬套。`
         : '\nfestivalPost 設為 null。';
+      // 趨勢話題：使用者從 Threads 熱門話題挑選或自行輸入（只有標題）
+      const trend = p.wantTrend ? s(p.trend, 60) : '', angle = trend ? s(p.trendAngle, 80) : '';
+      const trendText = trend
+        ? `
+使用者想結合的 Threads 趨勢話題：「${trend}」（只知道話題名稱，未經查證）。
+${angle ? `這個話題已確認可以結合，切入角度：${angle}。請依這個角度在 trendPost 寫貼文，不要因為「關聯不夠強」而拒絕。` : `使用者已經選定這個話題：請盡量找出合理的切入點（同類商品、相同使用情境、族群喜好、節令、流行文化或話題帶起的情緒都可以），只有完全找不到任何合理連結時才放棄。`}
+請在 trendPost 寫一則 60–150 字的 Threads 貼文：開頭用話題抓住注意力，再自然帶到商品，Threads 版型、CTA、最多 1 個 hashtag；只能使用話題名稱本身，不要編造話題的細節、數據或當事人說法，也不要描述或評價話題本身的內容（例如電影劇情好不好看、會不會哭、商品好不好買），只用話題當開場或情境。
+以下情況一律不結合，trendPost 設為 null，並在 trendNote 用一句話說明原因：政治與選舉、災難意外、傷亡、犯罪或司法案件、未經證實的爆料或八卦、涉及特定個人私生活${angle ? '' : '、完全找不到任何合理連結'}。`
+        : '\ntrendPost 與 trendNote 設為 null。';
       // 賣場：只有賣場名稱（分潤連結不會送來）
       const isShop = p.kind === 'shop';
       return { json: true, text: `${isShop ? `請為以下蝦皮賣場（推廣整間賣場，不是單一商品）產出可直接在社群媒體使用的分潤貼文素材。
@@ -70,8 +79,19 @@ ${JSON.stringify({ 賣場名稱: s(p.name, 60), 平台: plat(p.platform) })}` : 
 商品資料（使用者輸入，未經查證）：
 ${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40), 價格: n(p.price), 總佣金率百分比: n(p.rate), 平台: plat(p.platform), 形式: s(p.format, 20), 系統總分: n(p.total), 分級: s(p.grade, 2), 構面評分1到5: scores(p.scores) })}`}
 只輸出 JSON，結構如下：
-{"verdict":"一句話判斷","festivalPost":{"festival":"節慶名稱","post":"節慶活動貼文"},"posts":["3 則可直接發布的短貼文：每則 60–150 字、Threads 版型（開頭一行、空一行、每句一行的內文、空一行、行動呼籲）、口語自然、第一句就抓住注意力（痛點、反差或驚喜）、適當點綴 1–3 個表情符號（不要每句都加）、行尾不用「。」或「，」、行動呼籲例如「連結在留言／個人頁」、最多 1 個 hashtag；三則風格不同（痛點型、開箱驚喜型、限時優惠型）"],"longPost":"一則 150–300 字的使用心得長文，適合 Facebook 社團或 Dcard：真實情境開頭、3 個重點、優缺點都提、結尾 CTA","headlines":["3–5 個吸睛的第一句／標題"],"carousel":[{"slide":"第 1 張","title":"圖上大字","text":"說明"}],"imageIdeas":["3–4 個實拍照片建議（拍什麼、怎麼構圖）"],"strengths":["優勢"],"risks":["風險"],"cta":"行動呼籲（含連結放哪裡）","hashtags":["一律 5 個 #關鍵字（繁體中文為主、# 開頭、不含空白；涵蓋商品類別、使用情境、核心賣點、目標族群、熱門搜尋詞）"],"bestTime":"建議發文時段與理由","replies":["2–3 個預想留言提問與建議回覆"],"tests":["A/B 測試建議"],"compliance":["合規提醒"]}
-carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${plat(p.platform)}，貼文形式：${s(p.format, 20) || '圖文貼文'}。${festText}` };
+{"verdict":"一句話判斷","festivalPost":{"festival":"節慶名稱","post":"節慶活動貼文"},"trendPost":{"topic":"趨勢話題","post":"結合話題的貼文"},"trendNote":"不結合時的原因（結合時為 null）","posts":["3 則可直接發布的短貼文：每則 60–150 字、Threads 版型（開頭一行、空一行、每句一行的內文、空一行、行動呼籲）、口語自然、第一句就抓住注意力（痛點、反差或驚喜）、適當點綴 1–3 個表情符號（不要每句都加）、行尾不用「。」或「，」、行動呼籲例如「連結在留言／個人頁」、最多 1 個 hashtag；三則風格不同（痛點型、開箱驚喜型、限時優惠型）"],"longPost":"一則 150–300 字的使用心得長文，適合 Facebook 社團或 Dcard：真實情境開頭、3 個重點、優缺點都提、結尾 CTA","headlines":["3–5 個吸睛的第一句／標題"],"carousel":[{"slide":"第 1 張","title":"圖上大字","text":"說明"}],"imageIdeas":["3–4 個實拍照片建議（拍什麼、怎麼構圖）"],"strengths":["優勢"],"risks":["風險"],"cta":"行動呼籲（含連結放哪裡）","hashtags":["一律 5 個 #關鍵字（繁體中文為主、# 開頭、不含空白；涵蓋商品類別、使用情境、核心賣點、目標族群、熱門搜尋詞）"],"bestTime":"建議發文時段與理由","replies":["2–3 個預想留言提問與建議回覆"],"tests":["A/B 測試建議"],"compliance":["合規提醒"]}
+carousel 為 Instagram 多圖輪播 5–6 張的內容規劃。主要平台：${plat(p.platform)}，貼文形式：${s(p.format, 20) || '圖文貼文'}。${festText}${trendText}` };
+    }
+    case 'trend_pick': {
+      // 從熱門話題清單挑一個能自然結合此商品／賣場的話題（只看話題名稱）
+      const topics = (Array.isArray(p.topics) ? p.topics : []).map((t) => s(t, 40)).filter(Boolean).slice(0, 30);
+      return { json: true, fast: true, perTry: 12000, text: `以下是目前 Threads 的熱門話題（只有名稱，未經查證）：
+${topics.map((t, k) => `${k + 1}. ${t}`).join('\n')}
+
+${p.kind === 'shop' ? '蝦皮賣場' : '商品'}：${JSON.stringify({ 名稱: s(p.name, 120), 分類: s(p.category, 40) })}
+
+請挑出「最能自然、正面地結合這個${p.kind === 'shop' ? '賣場' : '商品'}來寫推廣貼文」的一個話題：同類商品、相同使用情境、相同族群喜好、節令或流行文化都算；只是硬拗、或屬於政治、災難、傷亡、犯罪、未證實八卦、特定個人私生活的話題都不要選。若沒有任何一個搭得上，topic 設為 null。
+只輸出 JSON：{"topic":"完全照抄清單中的話題名稱，或 null","reason":"一句話說明為什麼搭得上（或為什麼都搭不上），25 字內"}` };
     }
     case 'video_plan': {
       // 只依使用者輸入的提示詞設計風格、分鏡與文案（AI 不看影片）
@@ -100,6 +120,26 @@ ${style ? `使用者指定風格：${style}` : `風格請從以下選一個最�
   }
 }
 
+// AI 偶爾在 JSON 字串裡直接換行（不合格式），解析失敗就把字串內的換行、Tab 轉義後再試；也容許結尾多一個逗號
+function looseJSON(text) {
+  const raw = String(text || '').replace(/```(?:json)?/g, '');
+  const a = raw.indexOf('{'), b = raw.lastIndexOf('}'); if (a < 0 || b <= a) return null;
+  const src = raw.slice(a, b + 1);
+  try { return JSON.parse(src); } catch {}
+  let out = '', inStr = false, esc = false;
+  for (const ch of src) {
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === '\\') { out += ch; esc = true; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') continue;
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  try { return JSON.parse(out.replace(/,\s*([}\]])/g, '$1')); } catch { return null; }
+}
 function retrySecs(j) {
   const d = (j?.error?.details || []).find((x) => String(x['@type'] || '').includes('RetryInfo'));
   const v = parseInt(d?.retryDelay, 10);
@@ -183,8 +223,7 @@ export default async (req) => {
       let parsed = null;
       if (pr.json || pr.extract) {
         // 搜尋接地時無法強制 JSON 模式，所以從文字中擷取第一個 {...} 區塊
-        const m = text.replace(/```(?:json)?/g, '').match(/\{[\s\S]*\}/);
-        try { parsed = JSON.parse(m ? m[0] : text); } catch { /* 前端退回顯示原文 */ }
+        parsed = looseJSON(text);   // 解析失敗時前端退回顯示原文
       }
       const seen = new Set();
       const sources = (c.groundingMetadata?.groundingChunks || []).map((g) => g.web)
